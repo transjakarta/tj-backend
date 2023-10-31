@@ -28,3 +28,9 @@ class Route(BaseModel):
     color: str
     text_color: str
     trips: list[Trip]
+
+
+class Place(BaseModel):
+    id: str
+    name: str
+    isStop: bool
