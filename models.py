@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+from datetime import datetime
 
 
 class Stop(BaseModel):
@@ -7,6 +8,10 @@ class Stop(BaseModel):
     name: str
     lat: float
     lon: float
+
+
+class StopEta(Stop):
+    eta: datetime
 
 
 class Trip(BaseModel):

@@ -61,13 +61,15 @@ async def get_routes() -> list[models.Route]:
 
 
 @app.get("/stops/{trip_id}")
-async def get_stops_by_route_id(trip_id: str) -> list[models.Stop]:
+async def get_stops_by_route_id(trip_id: str) -> list[models.StopEta]:
     stop_times = feed.stop_times[feed.stop_times["trip_id"] == trip_id][[
         "stop_id", "stop_sequence"]]
 
     stops = feed.stops[["stop_id", "stop_name", "stop_lat", "stop_lon"]]
 
     merged = pd.merge(stop_times, stops, on="stop_id")
+    merged["eta"] = datetime.now().replace(microsecond=0).isoformat()
+
     merged = merged.sort_values(by=["stop_sequence"])
     merged = merged.rename(columns={
         "stop_id": "id",
