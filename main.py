@@ -7,6 +7,7 @@ from json import loads
 from collections import defaultdict
 
 from fastapi import FastAPI
+import models
 
 app = FastAPI()
 
@@ -15,18 +16,18 @@ route_ids = ["4B", "D21", "9H"]
 
 
 @app.get("/routes")
-async def get_routes():
-    filtered_routes = feed.routes[feed.routes.route_id.isin(
+async def get_routes() -> list[models.Route]:
+    routes = feed.routes[feed.routes.route_id.isin(
         route_ids)][["route_id", "route_color", "route_text_color"]]
 
-    filtered_trips = feed.trips[feed.trips["route_id"].isin(
+    trips = feed.trips[feed.trips["route_id"].isin(
         route_ids)][["route_id", "trip_id", "trip_headsign", "direction_id"]]
 
     trip_stats = gk.compute_trip_stats(feed, route_ids=route_ids)[
         ["trip_id", "num_stops", "distance"]]
 
-    merged = pd.merge(filtered_trips, trip_stats, on="trip_id")
-    merged = pd.merge(merged, filtered_routes, on="route_id")
+    merged = pd.merge(trips, trip_stats, on="trip_id")
+    merged = pd.merge(merged, routes, on="route_id")
 
     merged["origin"] = merged.apply(
         lambda row: row["trip_headsign"].split(" - ")[0], axis=1)
@@ -53,7 +54,27 @@ async def get_routes():
         ddict[key].append(d)
 
     json = [
-        {"route": route, "color": color, "text_color": text_color, "trips": trips}
+        {"id": route, "color": color, "text_color": text_color, "trips": trips}
         for (route, color, text_color), trips in ddict.items()]
 
     return json
+
+
+@app.get("/stops/{trip_id}")
+async def get_stops_by_route_id(trip_id: str) -> list[models.Stop]:
+    stop_times = feed.stop_times[feed.stop_times["trip_id"] == trip_id][[
+        "stop_id", "stop_sequence"]]
+
+    stops = feed.stops[["stop_id", "stop_name", "stop_lat", "stop_lon"]]
+
+    merged = pd.merge(stop_times, stops, on="stop_id")
+    merged = merged.sort_values(by=["stop_sequence"])
+    merged = merged.rename(columns={
+        "stop_id": "id",
+        "stop_sequence": "order",
+        "stop_name": "name",
+        "stop_lat": "lat",
+        "stop_lon": "lon"
+    })
+
+    return loads(merged.to_json(orient="records"))
