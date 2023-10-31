@@ -1,14 +1,20 @@
+import os
 import pandas as pd
+import requests
 import gtfs_kit as gk
 import gtfs_kit.helpers as gh
 import gtfs_kit.constants as gc
+from geopy.distance import geodesic
 
 from json import loads
 from collections import defaultdict
 from datetime import datetime
+from dotenv import load_dotenv
 
 from fastapi import FastAPI
 import models
+
+load_dotenv()
 
 app = FastAPI()
 
@@ -90,3 +96,58 @@ async def get_stops_by_route_id(trip_id: str, include_eta: bool = False) -> list
     })
 
     return loads(merged.to_json(orient="records"))
+
+
+
+@app.get("/search")
+async def get_place_by_distance_or_query(query: str | None = None, lat: float | None = None, long: float | None = None, language_code: str = "id") -> list[models.Place]:
+    stops = feed.get_stops()
+
+    if query:
+        filtered_stops = stops.loc[stops["stop_name"].str.contains(query, case=False), ["stop_id", "stop_name", "stop_lat", "stop_lon"]]
+    else:
+        filtered_stops = stops.copy()
+    filtered_stops["isStop"] = True
+
+    if query and filtered_stops.shape[0] == 0:
+        url = 'https://places.googleapis.com/v1/places:searchText'
+        headers = {
+            'Content-Type': 'application/json',
+            'X-Goog-Api-Key': os.environ.get("PLACES_API_KEY"),
+            'X-Goog-FieldMask': 'places.displayName,places.id'
+        }
+
+        data = {
+            "textQuery": query,
+            "languageCode": language_code,
+        }
+        if lat and long:
+            data["locationBias"] = {
+                "circle": {
+                    "center": {
+                        "latitude": lat,
+                        "longitude": long
+                    },
+                    "radius": 500.0
+                }
+            }
+
+
+        response = requests.post(url, json=data, headers=headers)
+
+        google_places_df = pd.DataFrame(response.json()["places"])
+        google_places_df["name"] = google_places_df["displayName"].apply(lambda x: x["text"])
+        google_places_df["isStop"] = False
+
+        place_df = google_places_df[["id", "name", "isStop"]]
+    else:
+        if lat and long:
+            filtered_stops["distance"] = filtered_stops.apply(lambda row: geodesic((lat, long), (row["stop_lat"], row["stop_lon"])).km, axis=1)
+            filtered_stops.sort_values(by=["distance"], inplace=True)
+        if query is None:
+            filtered_stops = filtered_stops.head(10)
+
+        filtered_stops.rename(columns={"stop_id": "id", "stop_name": "name"}, inplace=True)
+        place_df = filtered_stops[["id", "name", "isStop"]]
+
+    return loads(place_df.to_json(orient="records"))
