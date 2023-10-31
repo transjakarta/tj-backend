@@ -11,7 +11,7 @@ class Stop(BaseModel):
 
 
 class StopEta(Stop):
-    eta: datetime
+    eta: datetime = None
 
 
 class Trip(BaseModel):

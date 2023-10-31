@@ -5,6 +5,7 @@ import gtfs_kit.constants as gc
 
 from json import loads
 from collections import defaultdict
+from datetime import datetime
 
 from fastapi import FastAPI
 import models
@@ -60,17 +61,26 @@ async def get_routes() -> list[models.Route]:
     return json
 
 
-@app.get("/stops/{trip_id}")
-async def get_stops_by_route_id(trip_id: str) -> list[models.StopEta]:
+@app.get("/trip/{trip_id}/geojson")
+async def get_trip_geojson_by_trip_id(trip_id: str):
+    json = gk.trips_to_geojson(feed, trip_ids=[trip_id])["features"][0]
+    del json["properties"]
+    return json
+
+
+@app.get("/stops/{trip_id}", response_model_exclude_none=True)
+async def get_stops_by_route_id(trip_id: str, include_eta: bool = False) -> list[models.StopEta]:
     stop_times = feed.stop_times[feed.stop_times["trip_id"] == trip_id][[
         "stop_id", "stop_sequence"]]
 
     stops = feed.stops[["stop_id", "stop_name", "stop_lat", "stop_lon"]]
 
     merged = pd.merge(stop_times, stops, on="stop_id")
-    merged["eta"] = datetime.now().replace(microsecond=0).isoformat()
-
     merged = merged.sort_values(by=["stop_sequence"])
+
+    if include_eta:
+        merged["eta"] = datetime.now().replace(microsecond=0).isoformat()
+
     merged = merged.rename(columns={
         "stop_id": "id",
         "stop_sequence": "order",
