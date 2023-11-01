@@ -11,7 +11,7 @@ class Stop(BaseModel):
 
 
 class StopEta(Stop):
-    eta: datetime = None
+    eta: datetime | None = None
 
 
 class Trip(BaseModel):
@@ -33,4 +33,6 @@ class Route(BaseModel):
 class Place(BaseModel):
     id: str
     name: str
-    isStop: bool
+    is_stop: bool = False
+    distance: float | None = None
+    routes: list[str] | None = None

@@ -18,17 +18,38 @@ load_dotenv()
 
 app = FastAPI()
 
-feed = gk.read_feed("./data/gtfs.zip", dist_units='km')
+feed = gk.read_feed("./data/gtfs.zip", dist_units="km")
 route_ids = ["4B", "D21", "9H"]
+
+_routes = feed.routes[feed.routes["route_id"].isin(route_ids)]
+_trips = feed.trips[feed.trips["route_id"].isin(route_ids)]
+
+_stop_times = feed.stop_times[
+    feed.stop_times["trip_id"].isin(_trips["trip_id"])]
+
+_stops = feed.stops[feed.stops["stop_id"].isin(_stop_times["stop_id"])]
+_stops = _stops.merge(
+    _stop_times
+    .merge(_trips, on="trip_id")
+    .merge(_stops, on="stop_id")
+    .groupby("stop_id").agg({
+        "trip_id": lambda x: list(set(x)),
+        "route_id": lambda x: list(set(x))
+    })
+    .rename(columns={
+        "trip_id": "trips",
+        "route_id": "routes"
+    })
+    .reset_index(),
+    on="stop_id",
+    how="left"
+)
 
 
 @app.get("/routes")
 async def get_routes() -> list[models.Route]:
-    routes = feed.routes[feed.routes.route_id.isin(
-        route_ids)][["route_id", "route_color", "route_text_color"]]
-
-    trips = feed.trips[feed.trips["route_id"].isin(
-        route_ids)][["route_id", "trip_id", "trip_headsign", "direction_id"]]
+    routes = _routes[["route_id", "route_color", "route_text_color"]]
+    trips = _trips[["route_id", "trip_id", "trip_headsign", "direction_id"]]
 
     trip_stats = gk.compute_trip_stats(feed, route_ids=route_ids)[
         ["trip_id", "num_stops", "distance"]]
@@ -76,10 +97,11 @@ async def get_trip_geojson_by_trip_id(trip_id: str):
 
 @app.get("/stops/{trip_id}", response_model_exclude_none=True)
 async def get_stops_by_route_id(trip_id: str, include_eta: bool = False) -> list[models.StopEta]:
-    stop_times = feed.stop_times[feed.stop_times["trip_id"] == trip_id][[
-        "stop_id", "stop_sequence"]]
+    stop_times = _stop_times.loc[
+        _stop_times["trip_id"] == trip_id,
+        ["stop_id", "stop_sequence"]]
 
-    stops = feed.stops[["stop_id", "stop_name", "stop_lat", "stop_lon"]]
+    stops = _stops[["stop_id", "stop_name", "stop_lat", "stop_lon"]]
 
     merged = pd.merge(stop_times, stops, on="stop_id")
     merged = merged.sort_values(by=["stop_sequence"])
@@ -98,56 +120,93 @@ async def get_stops_by_route_id(trip_id: str, include_eta: bool = False) -> list
     return loads(merged.to_json(orient="records"))
 
 
+@app.get("/search", response_model_exclude_none=True)
+async def get_place_by_distance_or_query(
+    query: str | None = None,
+    lat: float | None = None,
+    lon: float | None = None,
+    language_code: str = "id"
+) -> list[models.Place]:
+    global _stops
+    stops = _stops.copy()
 
-@app.get("/search")
-async def get_place_by_distance_or_query(query: str | None = None, lat: float | None = None, long: float | None = None, language_code: str = "id") -> list[models.Place]:
-    stops = feed.get_stops()
+    # Search for stops which contains query
+    if query:
+        stops = stops.loc[
+            stops["stop_name"].str.contains(query, case=False),
+            ["stop_id", "stop_name", "stop_lat", "stop_lon", "routes"]
+        ]
+
+    # Set default is_stop to true
+    stops["is_stop"] = True
+    stops = stops.rename(columns={
+        "stop_id": "id",
+        "stop_name": "name",
+        "stop_lat": "lat",
+        "stop_lon": "lon",
+    })
+
+    # Sort stops by distance if coordinate is provided
+    if lat and lon:
+        stops["distance"] = stops.apply(
+            lambda row: geodesic((lat, lon), (row["lat"], row["lon"])).km,
+            axis=1
+        )
+        stops = stops.sort_values(by=["distance"])
+
+    # Limit to top 10
+    places = stops.head(10)
 
     if query:
-        filtered_stops = stops.loc[stops["stop_name"].str.contains(query, case=False), ["stop_id", "stop_name", "stop_lat", "stop_lon"]]
-    else:
-        filtered_stops = stops.copy()
-    filtered_stops["isStop"] = True
-
-    if query and filtered_stops.shape[0] == 0:
-        url = 'https://places.googleapis.com/v1/places:searchText'
+        url = "https://places.googleapis.com/v1/places:searchText"
         headers = {
-            'Content-Type': 'application/json',
-            'X-Goog-Api-Key': os.environ.get("PLACES_API_KEY"),
-            'X-Goog-FieldMask': 'places.displayName,places.id'
+            "Content-Type": "application/json",
+            "X-Goog-Api-Key": os.environ.get("PLACES_API_KEY"),
+            "X-Goog-FieldMask": ",".join([
+                "places.displayName",
+                "places.id",
+                *(["places.location"] if lat and lon else [])
+            ])
         }
 
-        data = {
+        body = {
             "textQuery": query,
             "languageCode": language_code,
-        }
-        if lat and long:
-            data["locationBias"] = {
+            "maxResultCount": 10 - places.shape[0],
+            "locationBias": {
                 "circle": {
                     "center": {
                         "latitude": lat,
-                        "longitude": long
+                        "longitude": lon
                     },
                     "radius": 500.0
                 }
-            }
+            } if lat and lon else None
+        }
 
+        response = requests.post(url, json=body, headers=headers)
+        google_places = pd.DataFrame(response.json()["places"])
 
-        response = requests.post(url, json=data, headers=headers)
+        google_places["name"] = google_places["displayName"] \
+            .apply(lambda x: x["text"])
+        google_places["is_stop"] = False
 
-        google_places_df = pd.DataFrame(response.json()["places"])
-        google_places_df["name"] = google_places_df["displayName"].apply(lambda x: x["text"])
-        google_places_df["isStop"] = False
+        if lat and lon:
+            google_places["distance"] = google_places.apply(
+                lambda row: geodesic(
+                    (lat, lon),
+                    (row["location"]["latitude"], row["location"]["longitude"])
+                ).km,
+                axis=1
+            )
+            google_places = google_places.sort_values(by=["distance"])
 
-        place_df = google_places_df[["id", "name", "isStop"]]
-    else:
-        if lat and long:
-            filtered_stops["distance"] = filtered_stops.apply(lambda row: geodesic((lat, long), (row["stop_lat"], row["stop_lon"])).km, axis=1)
-            filtered_stops.sort_values(by=["distance"], inplace=True)
-        if query is None:
-            filtered_stops = filtered_stops.head(10)
+        places = pd.concat(
+            [places, google_places[["id", "name", "is_stop", "distance"]]],
+            ignore_index=True
+        )
 
-        filtered_stops.rename(columns={"stop_id": "id", "stop_name": "name"}, inplace=True)
-        place_df = filtered_stops[["id", "name", "isStop"]]
+    if lat and lon:
+        places = places.sort_values(by=["distance"])
 
-    return loads(place_df.to_json(orient="records"))
+    return loads(places.to_json(orient="records"))
