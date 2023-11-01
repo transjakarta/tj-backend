@@ -1,6 +1,7 @@
 import os
 import pandas as pd
 import requests
+
 import gtfs_kit as gk
 import gtfs_kit.helpers as gh
 import gtfs_kit.constants as gc
@@ -11,7 +12,7 @@ from collections import defaultdict
 from datetime import datetime
 from dotenv import load_dotenv
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 import models
 
 load_dotenv()
@@ -27,6 +28,7 @@ _trips = feed.trips[feed.trips["route_id"].isin(route_ids)]
 _stop_times = feed.stop_times[
     feed.stop_times["trip_id"].isin(_trips["trip_id"])]
 
+# Aggregate list of trips and routes which each stop is a part of
 _stops = feed.stops[feed.stops["stop_id"].isin(_stop_times["stop_id"])]
 _stops = _stops.merge(
     _stop_times
@@ -86,6 +88,32 @@ async def get_routes() -> list[models.Route]:
         for (route, color, text_color), trips in ddict.items()]
 
     return json
+
+
+@app.get("/trip/{trip_id}")
+async def get_trip_by_trip_id(trip_id: str) -> models.Trip:
+    trip = _trips[_trips["trip_id"] == trip_id]
+
+    if trip.shape[0] == 0:
+        raise HTTPException(status_code=404, detail="Trip not found")
+
+    trip = trip[["route_id", "trip_id", "trip_headsign", "direction_id"]]
+    trip_stats = gk.compute_trip_stats(feed, route_ids=trip["route_id"])[
+        ["trip_id", "num_stops", "distance"]]
+
+    trip = pd.merge(trip, trip_stats, on="trip_id")
+    trip = trip.rename(columns={
+        "trip_id": "id",
+        "trip_headsign": "name",
+        "direction_id": "direction",
+    })
+
+    trip["origin"] = trip.apply(
+        lambda row: row["name"].split(" - ")[0], axis=1)
+    trip["destination"] = trip.apply(
+        lambda row: row["name"].split(" - ")[1], axis=1)
+
+    return loads(trip.to_json(orient="records"))[0]
 
 
 @app.get("/trip/{trip_id}/geojson")
