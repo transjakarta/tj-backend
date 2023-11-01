@@ -120,6 +120,18 @@ async def get_stops_by_route_id(trip_id: str, include_eta: bool = False) -> list
     return loads(merged.to_json(orient="records"))
 
 
+@app.get("/stops/search")
+async def get_stops_by_query(query: str | None = None):
+    stops = _stops.copy()
+
+    # Search for stops which contains query
+    if query:
+        stops = stops.loc[
+            stops["stop_name"].str.contains(query, case=False),
+            ["stop_id", "stop_name", "stop_lat", "stop_lon", "routes"]
+        ]
+
+
 @app.get("/search", response_model_exclude_none=True)
 async def get_place_by_distance_or_query(
     query: str | None = None,
@@ -127,7 +139,6 @@ async def get_place_by_distance_or_query(
     lon: float | None = None,
     language_code: str = "id"
 ) -> list[models.Place]:
-    global _stops
     stops = _stops.copy()
 
     # Search for stops which contains query
@@ -201,10 +212,7 @@ async def get_place_by_distance_or_query(
             )
             google_places = google_places.sort_values(by=["distance"])
 
-        places = pd.concat(
-            [places, google_places[["id", "name", "is_stop", "distance"]]],
-            ignore_index=True
-        )
+        places = pd.concat([places, google_places], ignore_index=True)
 
     if lat and lon:
         places = places.sort_values(by=["distance"])
