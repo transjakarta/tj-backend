@@ -13,8 +13,9 @@ class Stop(BaseModel):
 class StopEta(Stop):
     eta: datetime | None = None
 
-class NearestStop(StopEta):
-    distance: float | None = None
+class StopDetails(Stop):
+    walking_distance: float
+    walking_duration: float
     routes: list[str] | None = None
 
 

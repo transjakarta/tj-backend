@@ -296,15 +296,15 @@ async def get_place_by_distance_or_query(
 async def get_stops_by_distance(
     lat: float,
     lon: float,
-) -> list[models.NearestStop]:
+) -> list[models.StopDetails]:
     stops = _stops.loc[:, ["stop_id", "stop_name", "stop_lat", "stop_lon", "routes"]].copy()
 
     # Sort stops by distance
-    stops["distance"] = stops.apply(
-        lambda row: geodesic((lat, lon), (row["stop_lat"], row["stop_lon"])).km,
+    stops["walking_distance"] = stops.apply(
+        lambda row: geodesic((lat, lon), (row["stop_lat"], row["stop_lon"])).m,
         axis=1
     )
-    stops = stops.sort_values(by=["distance"])
+    stops = stops.sort_values(by=["walking_distance"])
 
     # rename to match model
     stops = stops.rename(columns={
@@ -318,7 +318,6 @@ async def get_stops_by_distance(
     stops = stops.head(10)
 
     # calculate ETA
-    # dummy: set to 5 minutes from now
-    stops["eta"] = (datetime.now() + timedelta(minutes=5)).replace(microsecond=0).isoformat()
+    stops["walking_duration"] = 5.0 # dummy: 5 minutes
 
     return loads(stops.to_json(orient="records"))
