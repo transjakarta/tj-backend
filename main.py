@@ -49,7 +49,7 @@ _stops = _stops.merge(
 
 
 @app.get("/routes")
-async def get_routes() -> list[models.Route]:
+async def get_routes() -> list[models.RouteTrips]:
     routes = _routes[["route_id", "route_color", "route_text_color"]]
     trips = _trips[["route_id", "trip_id", "trip_headsign", "direction_id"]]
 
@@ -148,16 +148,60 @@ async def get_stops_by_route_id(trip_id: str, include_eta: bool = False) -> list
     return loads(merged.to_json(orient="records"))
 
 
-@app.get("/stops/search")
-async def get_stops_by_query(query: str | None = None):
-    stops = _stops.copy()
-
+@app.get("/search/stops", response_model_exclude_none=True)
+async def get_stops_by_query(query: str) -> list[models.RouteTripsStops]:
     # Search for stops which contains query
-    if query:
-        stops = stops.loc[
-            stops["stop_name"].str.contains(query, case=False),
-            ["stop_id", "stop_name", "stop_lat", "stop_lon", "routes"]
-        ]
+    stops = _stops.loc[
+        _stops["stop_name"].str.contains(query, case=False),
+        ["stop_id", "stop_name", "trips", "routes"]
+    ]
+
+    merged = pd.merge(_trips, _routes, on="route_id")
+
+    merged["origin"] = merged.apply(
+        lambda row: row["trip_headsign"].split(" - ")[0], axis=1)
+    merged["destination"] = merged.apply(
+        lambda row: row["trip_headsign"].split(" - ")[1], axis=1)
+
+    merged["route_color"] = merged.apply(
+        lambda row: f"0x{row['route_color']}FF", axis=1)
+    merged["route_text_color"] = merged.apply(
+        lambda row: f"0x{row['route_text_color']}FF", axis=1)
+
+    merged = merged[["route_id", "trip_id", "direction_id",
+                     "route_color", "route_text_color", "origin", "destination"]]
+    merged = merged.rename(columns={
+        "trip_id": "id",
+        "route_id": "route",
+        "direction_id": "direction",
+        "route_color": "color",
+        "route_text_color": "text_color"
+    })
+
+    # Create route-trips aggregate
+    routes_ddict = defaultdict(list)
+    for d in loads(merged.to_json(orient="records")):
+        key = (d.pop("route"), d.pop("color"), d.pop("text_color"))
+        routes_ddict[key].append(d)
+
+    json = [
+        {"id": route, "color": color, "text_color": text_color, "trips": trips}
+        for (route, color, text_color), trips in routes_ddict.items()]
+
+    # Create trip-stops aggregate
+    stops_ddict = defaultdict(list)
+    for _, row in stops.iterrows():
+        for trip_id in row["trips"]:
+            stops_ddict[trip_id].append({
+                "id": row["stop_id"],
+                "name": row["stop_name"]
+            })
+
+    for route in json:
+        for trip in route["trips"]:
+            trip["stops"] = stops_ddict.get(trip["id"], [])
+
+    return json
 
 
 @app.get("/search", response_model_exclude_none=True)
