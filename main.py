@@ -157,7 +157,14 @@ async def get_stops_by_query(query: str) -> list[models.RouteTripsStops]:
         ["stop_id", "stop_name", "trips", "routes"]
     ]
 
-    merged = pd.merge(_trips, _routes, on="route_id")
+    # Get relevant trips and routes
+    trip_ids = stops["trips"].explode().unique()
+    route_ids = stops["routes"].explode().unique()
+
+    trips = _trips[_trips["trip_id"].isin(trip_ids)]
+    routes = _routes[_routes["route_id"].isin(route_ids)]
+
+    merged = pd.merge(trips, routes, on="route_id")
 
     merged["origin"] = merged.apply(
         lambda row: row["trip_headsign"].split(" - ")[0], axis=1)
