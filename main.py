@@ -1,6 +1,7 @@
 import os
 import pandas as pd
 import requests
+import numpy as np
 
 import gtfs_kit as gk
 import gtfs_kit.helpers as gh
@@ -210,7 +211,7 @@ async def get_place_by_distance_or_query(
     lat: float | None = None,
     lon: float | None = None,
     language_code: str = "id"
-) -> list[models.Place]:
+) -> list[models.PlaceDetails]:
     stops = _stops.copy()
 
     # Search for stops which contains query
@@ -296,7 +297,7 @@ async def get_place_by_distance_or_query(
 async def get_stops_by_distance(
     lat: float,
     lon: float,
-) -> list[models.StopDetails]:
+) -> list[models.PlaceDetails]:
     stops = _stops.loc[:, ["stop_id", "stop_name", "stop_lat", "stop_lon", "routes"]].copy()
 
     # Sort stops by distance
@@ -317,7 +318,65 @@ async def get_stops_by_distance(
     # Limit to top 10
     stops = stops.head(10)
 
-    # calculate ETA
+    # calculate walking distance
     stops["walking_duration"] = 5.0 # dummy: 5 minutes
 
     return loads(stops.to_json(orient="records"))
+
+
+@app.post("/places", response_model_exclude_none=True)
+async def get_places_by_ids(body: models.GetPlacesByIdBody) -> list[models.PlaceDetails]:
+    stops = _stops.loc[:, ["stop_id", "stop_name", "stop_lat", "stop_lon", "routes"]].copy()
+    stops = stops.rename(columns={
+        "stop_id": "id",
+        "stop_name": "name",
+        "stop_lat": "lat",
+        "stop_lon": "lon",
+    })
+    stops["is_stop"] = True
+    lat, lon = body.lat, body.lon
+
+    # places = pd.DataFrame(columns=models.PlaceDetails.__fields__.keys())
+    places = []
+    for d in body.list_of_ids:
+        if d.is_stop:
+            place = stops.loc[stops["id"] == d.id, :].to_dict(orient="records")[0]
+        else:
+            url = f"https://places.googleapis.com/v1/places/{d.id}?languageCode={body.language_code}"
+            headers = {
+                "Content-Type": "application/json",
+                "X-Goog-Api-Key": os.environ.get("PLACES_API_KEY"),
+                "X-Goog-FieldMask": ",".join([
+                    "displayName",
+                    "id",
+                    "formattedAddress",
+                    "location"
+                ])
+            }
+
+            response = requests.get(url, headers=headers)
+            place = {
+                "id": response.json()["id"],
+                "name": response.json()["displayName"]["text"],
+                "address": response.json()["formattedAddress"],
+                "lat": response.json()["location"]["latitude"],
+                "lon": response.json()["location"]["longitude"],
+                "is_stop": False,
+            }
+        
+        
+        if lat and lon:
+            place["walking_distance"] = geodesic((lat, lon), (place["lat"], place["lon"])).m
+            
+            place["walking_duration"] = 5.0 # dummy: 5 minutes
+
+        # print(place.to_dict(orient="records"))
+
+        # places = pd.concat([places, place], ignore_index=True)
+        places.append(place)
+
+    
+
+    # return loads(places.to_json(orient="records"))
+    # return places
+    return places
