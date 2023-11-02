@@ -336,12 +336,12 @@ async def get_places_by_ids(body: models.GetPlacesByIdBody) -> list[models.Place
     stops["is_stop"] = True
     lat, lon = body.lat, body.lon
 
-    # places = pd.DataFrame(columns=models.PlaceDetails.__fields__.keys())
     places = []
     for d in body.list_of_ids:
         if d.is_stop:
             place = stops.loc[stops["id"] == d.id, :].to_dict(orient="records")[0]
         else:
+            # get place details from google places api
             url = f"https://places.googleapis.com/v1/places/{d.id}?languageCode={body.language_code}"
             headers = {
                 "Content-Type": "application/json",
@@ -364,19 +364,13 @@ async def get_places_by_ids(body: models.GetPlacesByIdBody) -> list[models.Place
                 "is_stop": False,
             }
         
-        
         if lat and lon:
+            # calculate walking distance
             place["walking_distance"] = geodesic((lat, lon), (place["lat"], place["lon"])).m
             
+            # calculate walking duration
             place["walking_duration"] = 5.0 # dummy: 5 minutes
 
-        # print(place.to_dict(orient="records"))
-
-        # places = pd.concat([places, place], ignore_index=True)
         places.append(place)
 
-    
-
-    # return loads(places.to_json(orient="records"))
-    # return places
     return places
