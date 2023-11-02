@@ -9,7 +9,7 @@ from geopy.distance import geodesic
 
 from json import loads
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
 from fastapi import FastAPI, HTTPException
@@ -290,3 +290,35 @@ async def get_place_by_distance_or_query(
         places = places.sort_values(by=["distance"])
 
     return loads(places.to_json(orient="records"))
+
+
+@app.get("/nearest-stops", response_model_exclude_none=True)
+async def get_stops_by_distance(
+    lat: float,
+    lon: float,
+) -> list[models.NearestStop]:
+    stops = _stops.loc[:, ["stop_id", "stop_name", "stop_lat", "stop_lon", "routes"]].copy()
+
+    # Sort stops by distance
+    stops["distance"] = stops.apply(
+        lambda row: geodesic((lat, lon), (row["stop_lat"], row["stop_lon"])).km,
+        axis=1
+    )
+    stops = stops.sort_values(by=["distance"])
+
+    # rename to match model
+    stops = stops.rename(columns={
+        "stop_id": "id",
+        "stop_name": "name",
+        "stop_lat": "lat",
+        "stop_lon": "lon",
+    })
+
+    # Limit to top 10
+    stops = stops.head(10)
+
+    # calculate ETA
+    # dummy: set to 5 minutes from now
+    stops["eta"] = (datetime.now() + timedelta(minutes=5)).replace(microsecond=0).isoformat()
+
+    return loads(stops.to_json(orient="records"))

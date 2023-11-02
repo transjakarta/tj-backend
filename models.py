@@ -13,6 +13,10 @@ class Stop(BaseModel):
 class StopEta(Stop):
     eta: datetime | None = None
 
+class NearestStop(StopEta):
+    distance: float | None = None
+    routes: list[str] | None = None
+
 
 class Trip(BaseModel):
     id: str
