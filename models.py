@@ -39,6 +39,7 @@ class Trip(BaseModel):
 
 
 class TripRoute(Trip):
+    route: str
     color: str
     text_color: str
 
