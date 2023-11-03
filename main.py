@@ -50,7 +50,7 @@ _stops = _stops.merge(
 
 
 @app.get("/routes")
-async def get_routes() -> list[models.RouteTrips]:
+async def get_routes() -> list[models.TripRoute]:
     routes = _routes[["route_id", "route_color", "route_text_color"]]
     trips = _trips[["route_id", "trip_id", "trip_headsign", "direction_id"]]
 
@@ -79,16 +79,7 @@ async def get_routes() -> list[models.RouteTrips]:
         "route_text_color": "text_color"
     })
 
-    ddict = defaultdict(list)
-    for d in loads(merged.to_json(orient="records")):
-        key = (d.pop("route"), d.pop("color"), d.pop("text_color"))
-        ddict[key].append(d)
-
-    json = [
-        {"id": route, "color": color, "text_color": text_color, "trips": trips}
-        for (route, color, text_color), trips in ddict.items()]
-
-    return json
+    return loads(merged.to_json(orient="records"))
 
 
 @app.get("/trip/{trip_id}")
