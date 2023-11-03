@@ -150,7 +150,7 @@ async def get_stops_by_route_id(trip_id: str, include_eta: bool = False) -> list
 
 
 @app.get("/search/stops", response_model_exclude_none=True)
-async def get_stops_by_query(query: str) -> list[models.RouteTripsStops]:
+async def get_stops_by_query(query: str) -> list[models.TripRouteStops]:
     # Search for stops which contains query
     stops = _stops.loc[
         _stops["stop_name"].str.contains(query, case=False),
@@ -186,17 +186,9 @@ async def get_stops_by_query(query: str) -> list[models.RouteTripsStops]:
         "route_text_color": "text_color"
     })
 
-    # Create route-trips aggregate
-    routes_ddict = defaultdict(list)
-    for d in loads(merged.to_json(orient="records")):
-        key = (d.pop("route"), d.pop("color"), d.pop("text_color"))
-        routes_ddict[key].append(d)
-
-    json = [
-        {"id": route, "color": color, "text_color": text_color, "trips": trips}
-        for (route, color, text_color), trips in routes_ddict.items()]
-
     # Create trip-stops aggregate
+    json = loads(merged.to_json(orient="records"))
+
     stops_ddict = defaultdict(list)
     for _, row in stops.iterrows():
         for trip_id in row["trips"]:
@@ -205,9 +197,10 @@ async def get_stops_by_query(query: str) -> list[models.RouteTripsStops]:
                 "name": row["stop_name"]
             })
 
-    for route in json:
-        for trip in route["trips"]:
-            trip["stops"] = stops_ddict.get(trip["id"], [])
+    for trip in json:
+        trip["stops"] = stops_ddict.get(trip["id"], [])
+
+    print(json)
 
     return json
 
@@ -305,7 +298,8 @@ async def get_stops_by_distance(
     lat: float,
     lon: float,
 ) -> list[models.PlaceDetails]:
-    stops = _stops.loc[:, ["stop_id", "stop_name", "stop_lat", "stop_lon", "routes"]].copy()
+    stops = _stops.loc[:, ["stop_id", "stop_name",
+                           "stop_lat", "stop_lon", "routes"]].copy()
 
     # Sort stops by distance
     stops["walking_distance"] = stops.apply(
@@ -326,14 +320,15 @@ async def get_stops_by_distance(
     stops = stops.head(10)
 
     # calculate walking distance
-    stops["walking_duration"] = 5.0 # dummy: 5 minutes
+    stops["walking_duration"] = 5.0  # dummy: 5 minutes
 
     return loads(stops.to_json(orient="records"))
 
 
 @app.post("/places", response_model_exclude_none=True)
 async def get_places_by_ids(body: models.GetPlacesByIdBody) -> list[models.PlaceDetails]:
-    stops = _stops.loc[:, ["stop_id", "stop_name", "stop_lat", "stop_lon", "routes"]].copy()
+    stops = _stops.loc[:, ["stop_id", "stop_name",
+                           "stop_lat", "stop_lon", "routes"]].copy()
     stops = stops.rename(columns={
         "stop_id": "id",
         "stop_name": "name",
@@ -346,7 +341,8 @@ async def get_places_by_ids(body: models.GetPlacesByIdBody) -> list[models.Place
     places = []
     for d in body.list_of_ids:
         if d.is_stop:
-            place = stops.loc[stops["id"] == d.id, :].to_dict(orient="records")[0]
+            place = stops.loc[stops["id"] == d.id, :].to_dict(orient="records")[
+                0]
         else:
             # get place details from google places api
             url = f"https://places.googleapis.com/v1/places/{d.id}?languageCode={body.language_code}"
@@ -370,13 +366,14 @@ async def get_places_by_ids(body: models.GetPlacesByIdBody) -> list[models.Place
                 "lon": response.json()["location"]["longitude"],
                 "is_stop": False,
             }
-        
+
         if lat and lon:
             # calculate walking distance
-            place["walking_distance"] = geodesic((lat, lon), (place["lat"], place["lon"])).m
-            
+            place["walking_distance"] = geodesic(
+                (lat, lon), (place["lat"], place["lon"])).m
+
             # calculate walking duration
-            place["walking_duration"] = 5.0 # dummy: 5 minutes
+            place["walking_duration"] = 5.0  # dummy: 5 minutes
 
         places.append(place)
 

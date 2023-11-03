@@ -8,6 +8,7 @@ class Place(BaseModel):
     address: str | None = None
     is_stop: bool = False
 
+
 class PlaceDetails(Place):
     distance: float | None = None
     lat: float | None = None
@@ -16,8 +17,9 @@ class PlaceDetails(Place):
     walking_duration: float | None = None
     routes: list[str] | None = None
 
+
 class Stop(Place):
-    is_stop: bool = True
+    is_stop: bool | None = None
     order: int | None = None
     lat: float | None = None
     lon: float | None = None
@@ -36,7 +38,16 @@ class Trip(BaseModel):
     distance: float | None = None
 
 
+class TripRoute(Trip):
+    color: str
+    text_color: str
+
+
 class TripStops(Trip):
+    stops: list[Stop] | None = None
+
+
+class TripRouteStops(TripRoute):
     stops: list[Stop] | None = None
 
 
