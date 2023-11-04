@@ -39,6 +39,7 @@ class Trip(BaseModel):
 
 
 class TripRoute(Trip):
+    opposite_id: str | None = None
     route: str
     color: str
     text_color: str

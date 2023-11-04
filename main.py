@@ -70,6 +70,9 @@ async def get_routes() -> list[models.TripRoute]:
     merged["route_text_color"] = merged.apply(
         lambda row: f"0x{row['route_text_color']}FF", axis=1)
 
+    merged["opposite_id"] = merged.apply(
+        lambda row: get_opposite_trip(row["route_id"], row["trip_id"]), axis=1)
+
     merged = merged.drop(columns=["trip_headsign"])
     merged = merged.rename(columns={
         "trip_id": "id",
@@ -166,8 +169,11 @@ async def get_stops_by_query(query: str) -> list[models.TripRouteStops]:
         lambda row: f"0x{row['route_color']}FF", axis=1)
     merged["route_text_color"] = merged.apply(
         lambda row: f"0x{row['route_text_color']}FF", axis=1)
+    
+    merged["opposite_id"] = merged.apply(
+        lambda row: get_opposite_trip(row["route_id"], row["trip_id"]), axis=1)
 
-    merged = merged[["route_id", "trip_id", "direction_id",
+    merged = merged[["route_id", "trip_id", "opposite_id", "direction_id",
                      "route_color", "route_text_color", "origin", "destination"]]
     merged = merged.rename(columns={
         "trip_id": "id",
@@ -176,6 +182,8 @@ async def get_stops_by_query(query: str) -> list[models.TripRouteStops]:
         "route_color": "color",
         "route_text_color": "text_color"
     })
+
+    print(merged.head())
 
     # Create trip-stops aggregate
     json = loads(merged.to_json(orient="records"))
@@ -190,8 +198,6 @@ async def get_stops_by_query(query: str) -> list[models.TripRouteStops]:
 
     for trip in json:
         trip["stops"] = stops_ddict.get(trip["id"], [])
-
-    print(json)
 
     return json
 
@@ -369,3 +375,13 @@ async def get_places_by_ids(body: models.GetPlacesByIdBody) -> list[models.Place
         places.append(place)
 
     return places
+
+
+def get_opposite_trip(route: str, trip: str):
+    opposite_trips = _trips[(_trips["route_id"] == route)
+                            & (_trips["trip_id"] != trip)]
+
+    if opposite_trips.shape[0] == 0:
+        return None
+
+    return opposite_trips.iloc[0]["trip_id"]
