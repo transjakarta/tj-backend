@@ -4,8 +4,6 @@ import requests
 import numpy as np
 
 import gtfs_kit as gk
-import gtfs_kit.helpers as gh
-import gtfs_kit.constants as gc
 from geopy.distance import geodesic
 
 from json import loads
@@ -20,7 +18,7 @@ load_dotenv()
 
 app = FastAPI()
 
-feed = gk.read_feed("./data/gtfs.zip", dist_units="km")
+feed = gk.read_feed("./data/gtfs")
 route_ids = ["4B", "D21", "9H"]
 
 _routes = feed.routes[feed.routes["route_id"].isin(route_ids)]
