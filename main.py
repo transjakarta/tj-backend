@@ -9,14 +9,6 @@ from geopy.distance import geodesic
 from json import loads
 from collections import defaultdict
 from datetime import datetime, timedelta
-from dotenv import load_dotenv
-
-from fastapi import FastAPI, HTTPException
-import models
-
-load_dotenv()
-
-app = FastAPI()
 
 feed = gk.read_feed("./data/gtfs")
 route_ids = ["4B", "D21", "9H"]
@@ -47,8 +39,7 @@ _stops = _stops.merge(
 )
 
 
-@app.get("/routes")
-async def get_routes() -> list[models.TripRoute]:
+async def get_routes():
     routes = _routes[["route_id", "route_color", "route_text_color"]]
     trips = _trips[["route_id", "trip_id", "trip_headsign", "direction_id"]]
 
@@ -83,12 +74,12 @@ async def get_routes() -> list[models.TripRoute]:
     return loads(merged.to_json(orient="records"))
 
 
-@app.get("/trip/{trip_id}")
-async def get_trip_by_trip_id(trip_id: str) -> models.Trip:
+async def get_trip_by_trip_id(trip_id: str):
     trip = _trips[_trips["trip_id"] == trip_id]
 
     if trip.shape[0] == 0:
-        raise HTTPException(status_code=404, detail="Trip not found")
+        # raise HTTPException(status_code=404, detail="Trip not found")
+        return None
 
     trip = trip[["route_id", "trip_id", "trip_headsign", "direction_id"]]
     trip_stats = gk.compute_trip_stats(feed, route_ids=trip["route_id"])[
@@ -109,15 +100,13 @@ async def get_trip_by_trip_id(trip_id: str) -> models.Trip:
     return loads(trip.to_json(orient="records"))[0]
 
 
-@app.get("/trip/{trip_id}/geojson")
 async def get_trip_geojson_by_trip_id(trip_id: str):
     json = gk.trips_to_geojson(feed, trip_ids=[trip_id])["features"][0]
     del json["properties"]
     return json
 
-
-@app.get("/stops/{trip_id}", response_model_exclude_none=True)
-async def get_stops_by_route_id(trip_id: str, include_eta: bool = False) -> list[models.StopEta]:
+\
+async def get_stops_by_route_id(trip_id: str, include_eta: bool = False):
     stop_times = _stop_times.loc[
         _stop_times["trip_id"] == trip_id,
         ["stop_id", "stop_sequence"]]
@@ -140,9 +129,8 @@ async def get_stops_by_route_id(trip_id: str, include_eta: bool = False) -> list
 
     return loads(merged.to_json(orient="records"))
 
-
-@app.get("/search/stops", response_model_exclude_none=True)
-async def get_stops_by_query(query: str) -> list[models.TripRouteStops]:
+\
+async def get_stops_by_query(query: str):
     # Search for stops which contains query
     stops = _stops.loc[
         _stops["stop_name"].str.contains(query, case=False),
@@ -200,13 +188,12 @@ async def get_stops_by_query(query: str) -> list[models.TripRouteStops]:
     return json
 
 
-@app.get("/search", response_model_exclude_none=True)
 async def get_place_by_distance_or_query(
     query: str | None = None,
     lat: float | None = None,
     lon: float | None = None,
     language_code: str = "id"
-) -> list[models.PlaceDetails]:
+):
     stops = _stops.copy()
 
     # Search for stops which contains query
@@ -288,11 +275,10 @@ async def get_place_by_distance_or_query(
     return loads(places.to_json(orient="records"))
 
 
-@app.get("/nearest-stops", response_model_exclude_none=True)
 async def get_stops_by_distance(
     lat: float,
     lon: float,
-) -> list[models.PlaceDetails]:
+):
     stops = _stops.loc[:, ["stop_id", "stop_name",
                            "stop_lat", "stop_lon", "routes"]].copy()
 
@@ -320,8 +306,7 @@ async def get_stops_by_distance(
     return loads(stops.to_json(orient="records"))
 
 
-@app.post("/places", response_model_exclude_none=True)
-async def get_places_by_ids(body: models.GetPlacesByIdBody) -> list[models.PlaceDetails]:
+async def get_places_by_ids(body):
     stops = _stops.loc[:, ["stop_id", "stop_name",
                            "stop_lat", "stop_lon", "routes"]].copy()
     stops = stops.rename(columns={
