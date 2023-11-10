@@ -22,9 +22,9 @@ load_dotenv()
 
 app = FastAPI()
 psws_manager = PubSubWebSocketManager(
-    host=os.environ.get("REDIS_HOST"),
-    port=os.environ.get("REDIS_PORT"),
-    password=os.environ.get("REDIS_PASSWORD")
+    redis_host=os.environ.get("REDIS_HOST"),
+    redis_port=os.environ.get("REDIS_PORT"),
+    redis_password=os.environ.get("REDIS_PASSWORD")
 )
 app.add_event_handler("shutdown", psws_manager.close_subscribers)
 

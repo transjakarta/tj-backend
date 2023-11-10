@@ -75,16 +75,17 @@ class RedisPubSubManager:
 
 
 class PubSubWebSocketManager:
-    def __init__(self, host="localhost", port=6379, password=None):
+    def __init__(self, redis_host="localhost", redis_port=6379, redis_password=None):
         """
         Initializes the WebSocketManager.
 
         Attributes:
             channels (dict): A dictionary to store WebSocket connections in different channel.
             pubsub_client (RedisPubSubManager): An instance of the RedisPubSubManager class for pub-sub functionality.
+            subscribers (list): A list to store all the Redis PubSub subscribers.
         """
         self.channels: dict = {}
-        self.pubsub_client = RedisPubSubManager(host, port, password)
+        self.pubsub_client = RedisPubSubManager(redis_host, redis_port, redis_password)
         self.subscribers = []
 
     async def subscribe_to_channel(self, channel: str, websocket: WebSocket) -> None:
