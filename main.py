@@ -392,7 +392,7 @@ def get_opposite_trip(route: str, trip: str):
     return opposite_trips.iloc[0]["trip_id"]
 
 
-@app.websocket("/ws/{bus_code}")
+@app.websocket("/bus/{bus_code}/ws")
 async def websocket_bus_gps(websocket: WebSocket, bus_code: str) -> None:
     channel = f"bus.{bus_code}"
     await psws_manager.subscribe_to_channel(channel, websocket)
