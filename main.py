@@ -11,12 +11,19 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 import models
+from socket_manager import PubSubWebSocketManager
 
 load_dotenv()
 
 app = FastAPI()
+psws_manager = PubSubWebSocketManager(
+    host=os.environ.get("REDIS_HOST"),
+    port=os.environ.get("REDIS_PORT"),
+    password=os.environ.get("REDIS_PASSWORD")
+)
+app.add_event_handler("shutdown", psws_manager.stop_redis)
 
 feed = gk.read_feed("./data/gtfs")
 route_ids = ["4B", "D21", "9H"]
@@ -383,3 +390,14 @@ def get_opposite_trip(route: str, trip: str):
         return None
 
     return opposite_trips.iloc[0]["trip_id"]
+
+
+@app.websocket("/ws/{bus_code}")
+async def websocket_bus_gps(websocket: WebSocket, bus_code: str) -> None:
+    channel = f"bus.{bus_code}"
+    await psws_manager.subscribe_to_channel(channel, websocket)
+    try:
+        while True:
+            await websocket.receive_text() # wait for client to disconnect
+    except WebSocketDisconnect:
+        await psws_manager.disconnect_from_channel(channel, websocket)
