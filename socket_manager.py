@@ -85,6 +85,7 @@ class PubSubWebSocketManager:
         """
         self.channels: dict = {}
         self.pubsub_client = RedisPubSubManager(host, port, password)
+        self.subscribers = []
 
     async def subscribe_to_channel(self, channel: str, websocket: WebSocket) -> None:
         """
@@ -103,6 +104,7 @@ class PubSubWebSocketManager:
 
             await self.pubsub_client.connect()
             pubsub_subscriber = await self.pubsub_client.subscribe(channel)
+            self.subscribers.append(pubsub_subscriber)
             asyncio.create_task(self._pubsub_data_reader(pubsub_subscriber))
 
     async def broadcast_to_channel(self, channel: str, data: str) -> None:
@@ -113,6 +115,7 @@ class PubSubWebSocketManager:
             channel (str): channel name.
             data (str): data to be broadcasted.
         """
+        await self.pubsub_client.connect()
         await self.pubsub_client._publish(channel, data)
 
     async def disconnect_from_channel(self, channel: str, websocket: WebSocket) -> None:
@@ -148,7 +151,7 @@ class PubSubWebSocketManager:
                         data = message["data"].decode("utf-8")
                         await socket.send_text(data)
         except Exception:
-            await pubsub_subscriber.close()
+            pass
 
     async def send_text(self, message: str, websocket: WebSocket):
         """
@@ -160,10 +163,9 @@ class PubSubWebSocketManager:
         """
         await websocket.send_text(message)
 
-    async def stop_redis(self):
+    async def close_subscribers(self):
         """
-        Stops the Redis connection.
+        Closes the Redis PubSub subscribers.
         """
-        await self.pubsub_client.redis_connection.close()
-        await self.pubsub_client.pubsub.close()
-
+        for subscriber in self.subscribers:
+            await subscriber.close()
