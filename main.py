@@ -177,7 +177,7 @@ async def get_stops_by_query(query: str) -> list[models.TripRouteStops]:
         lambda row: f"0x{row['route_color']}FF", axis=1)
     merged["route_text_color"] = merged.apply(
         lambda row: f"0x{row['route_text_color']}FF", axis=1)
-    
+
     merged["opposite_id"] = merged.apply(
         lambda row: get_opposite_trip(row["route_id"], row["trip_id"]), axis=1)
 
@@ -190,8 +190,6 @@ async def get_stops_by_query(query: str) -> list[models.TripRouteStops]:
         "route_color": "color",
         "route_text_color": "text_color"
     })
-
-    print(merged.head())
 
     # Create trip-stops aggregate
     json = loads(merged.to_json(orient="records"))
@@ -385,14 +383,59 @@ async def get_places_by_ids(body: models.GetPlacesByIdBody) -> list[models.Place
     return places
 
 
-def get_opposite_trip(route: str, trip: str):
-    opposite_trips = _trips[(_trips["route_id"] == route)
-                            & (_trips["trip_id"] != trip)]
+@app.post("/navigate")
+async def get_navigation(body: models.Endpoints):
+    now = datetime.now()
+    query = f"""
+        query Navigate {{
+            plan(
+                from: {{lat: {body.origin_lat}, lon: {body.origin_lon}}}
+                to: {{lat: {body.destination_lat}, lon: {body.destination_lon}}}
+                date: "{now.strftime("%Y-%m-%d")}"
+                time: "{now.strftime("%H:%M")}"
+                transportModes: [{{mode: WALK}}, {{mode: TRANSIT}}]
+            ) {{
+                itineraries {{
+                    startTime
+                    endTime
+                    legs {{
+                        mode
+                        startTime
+                        endTime
+                        from {{
+                            name
+                            lat
+                            lon
+                            departureTime
+                            arrivalTime
+                        }}
+                        to {{
+                            name
+                            lat
+                            lon
+                            departureTime
+                            arrivalTime
+                        }}
+                        route {{
+                            gtfsId
+                            longName
+                            shortName
+                            stops {{
+                                gtfsId
+                                name
+                            }}
+                        }}
+                        legGeometry {{
+                            points
+                        }}
+                    }}
+                }}
+            }}
+        }}
+    """
 
-    if opposite_trips.shape[0] == 0:
-        return None
-
-    return opposite_trips.iloc[0]["trip_id"]
+    response = requests.post(url="http://localhost:8080/otp/routers/default/index/graphql", json={"query": query})
+    return response.json()
 
 
 @app.websocket("/bus/{bus_code}/ws")
@@ -401,7 +444,7 @@ async def websocket_bus_gps(websocket: WebSocket, bus_code: str) -> None:
     await psws_manager.subscribe_to_channel(channel, websocket)
     try:
         while True:
-            await websocket.receive_text() # wait for client to disconnect
+            await websocket.receive_text()  # wait for client to disconnect
     except WebSocketDisconnect:
         await psws_manager.disconnect_from_channel(channel, websocket)
 
@@ -426,10 +469,20 @@ async def get_bus_gps(bus_code: str) -> None:
         "color": "PUTIH ORG",
         "gpsheading": 262,
         "gpsspeed": 3.7,
-        "eta": 1800, # seconds
+        "eta": 1800,  # seconds
     }
 
     # broadcast to channel
     await psws_manager.broadcast_to_channel(channel, json.dumps(data))
 
     return data
+
+
+def get_opposite_trip(route: str, trip: str):
+    opposite_trips = _trips[(_trips["route_id"] == route)
+                            & (_trips["trip_id"] != trip)]
+
+    if opposite_trips.shape[0] == 0:
+        return None
+
+    return opposite_trips.iloc[0]["trip_id"]

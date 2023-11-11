@@ -72,3 +72,10 @@ class GetPlacesByIdBody(BaseModel):
     lat: float | None = None
     lon: float | None = None
     language_code: str = "id"
+
+
+class Endpoints(BaseModel):
+    origin_lat: float
+    origin_lon: float
+    destination_lat: float
+    destination_lon: float
