@@ -1,22 +1,32 @@
 import os
+import sys
 import pandas as pd
 import requests
 import numpy as np
+import json
+import asyncio
 
 import gtfs_kit as gk
 from geopy.distance import geodesic
 
 from json import loads
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime
 from dotenv import load_dotenv
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 import models
+from socket_manager import PubSubWebSocketManager
 
 load_dotenv()
 
 app = FastAPI()
+psws_manager = PubSubWebSocketManager(
+    redis_host=os.environ.get("REDIS_HOST"),
+    redis_port=os.environ.get("REDIS_PORT"),
+    redis_password=os.environ.get("REDIS_PASSWORD")
+)
+app.add_event_handler("shutdown", psws_manager.close_subscribers)
 
 feed = gk.read_feed("./data/gtfs")
 route_ids = ["4B", "D21", "9H"]
@@ -383,3 +393,43 @@ def get_opposite_trip(route: str, trip: str):
         return None
 
     return opposite_trips.iloc[0]["trip_id"]
+
+
+@app.websocket("/bus/{bus_code}/ws")
+async def websocket_bus_gps(websocket: WebSocket, bus_code: str) -> None:
+    channel = f"bus.{bus_code}"
+    await psws_manager.subscribe_to_channel(channel, websocket)
+    try:
+        while True:
+            await websocket.receive_text() # wait for client to disconnect
+    except WebSocketDisconnect:
+        await psws_manager.disconnect_from_channel(channel, websocket)
+
+
+@app.get("/bus/{bus_code}/gps")
+async def get_bus_gps(bus_code: str) -> None:
+    channel = f"bus.{bus_code}"
+
+    # fetch bus gps data
+
+    # preprocess data
+
+    # predict eta
+
+    # dummy data
+    data = {
+        "bus_code": "TJ0487",
+        "koridor": "4B",
+        "gpsdatetime": "19/09/2023 05:26:05",
+        "latitude": -6.312733,
+        "longitude": 106.883828,
+        "color": "PUTIH ORG",
+        "gpsheading": 262,
+        "gpsspeed": 3.7,
+        "eta": 1800, # seconds
+    }
+
+    # broadcast to channel
+    await psws_manager.broadcast_to_channel(channel, json.dumps(data))
+
+    return data
