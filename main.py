@@ -28,7 +28,7 @@ psws_manager = PubSubWebSocketManager(
 )
 app.add_event_handler("shutdown", psws_manager.close_subscribers)
 
-feed = gk.read_feed("./data/gtfs")
+feed = gk.read_feed("./data/gtfs", dist_units="km")
 route_ids = ["4B", "D21", "9H"]
 
 _routes = feed.routes[feed.routes["route_id"].isin(route_ids)]
