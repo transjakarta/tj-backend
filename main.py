@@ -434,7 +434,7 @@ async def get_navigation(body: models.Endpoints):
         }}
     """
 
-    response = requests.post(url="http://localhost:8080/otp/routers/default/index/graphql", json={"query": query})
+    response = requests.post(url="http://otp:8080/otp/routers/default/index/graphql", json={"query": query})
     return response.json()
 
 
