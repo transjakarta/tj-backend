@@ -478,9 +478,9 @@ async def websocket_bus_gps(websocket: WebSocket, bus_code: str) -> None:
         await psws_manager.disconnect_from_channel(channel, websocket)
 
 
-@app.websocket("/routes/{routes_id}/ws")
-async def websocket_bus_gps(websocket: WebSocket, routes_id: str) -> None:
-    channel = f"routes.{routes_id}"
+@app.websocket("/trips/{trip_id}/ws")
+async def websocket_bus_gps(websocket: WebSocket, trip_id: str) -> None:
+    channel = f"trip.{trip_id}"
     await psws_manager.subscribe_to_channel(channel, websocket)
     try:
         while True:
@@ -728,7 +728,7 @@ async def tj_fetch():
             "gpsspeed": "speed"
         })
 
-    print(df)
+    print(df.head())
     return df
 
 
@@ -738,18 +738,18 @@ async def broadcast_gps(df):
         channel = f"bus.{row['id']}"
         await psws_manager.broadcast_to_channel(channel, json.dumps(row.to_dict()))
 
-    async def broadcast_to_route_channel(route, rows):
-        channel = f"routes.{route}"
+    async def broadcast_to_trip_channel(trip_id, rows):
+        channel = f"trip.{trip_id}"
         await psws_manager.broadcast_to_channel(channel, json.dumps(rows.to_dict(('records'))))
 
     tasks = []
     for _, row in df.iterrows():
         tasks.append(broadcast_to_bus_channel(row))
 
-    for route in df["route_id"].unique():
-        rows = df[df["route_id"] == route]
-        rows.loc[:, "trip_id"] = rows["trip_id"].str.replace(".", "-")
-        tasks.append(broadcast_to_route_channel(route, rows))
+    df.loc[:, "trip_id"] = df["trip_id"].str.replace(".", "-")
+    for trip_id in df["trip_id"].unique():
+        rows = df[df["trip_id"] == trip_id]
+        tasks.append(broadcast_to_trip_channel(trip_id, rows))
 
     await asyncio.gather(*tasks)
 
