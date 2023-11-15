@@ -1,8 +1,6 @@
 import os
-import sys
 import pandas as pd
 import requests
-import numpy as np
 import json
 import asyncio
 
@@ -15,19 +13,37 @@ from datetime import datetime
 from dotenv import load_dotenv
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-import models
 from socket_manager import PubSubWebSocketManager
+from contextlib import asynccontextmanager
 
-load_dotenv()
+import models
 
-app = FastAPI()
 psws_manager = PubSubWebSocketManager(
     redis_host=os.environ.get("REDIS_HOST"),
     redis_port=os.environ.get("REDIS_PORT"),
     redis_password=os.environ.get("REDIS_PASSWORD")
 )
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup events
+    asyncio.create_task(heartbeat())
+    yield
+
+    # Shutdown events
+    psws_manager.close_subscribers()
+
+
+load_dotenv()
+app = FastAPI(lifespan=lifespan)
 app.add_event_handler("shutdown", psws_manager.close_subscribers)
 
+
+# Global variables
+token = ""
+
+
+# GTFS dataframes
 feed = gk.read_feed("./data/gtfs", dist_units="km")
 route_ids = ["4B", "D21", "9H"]
 
@@ -434,7 +450,8 @@ async def get_navigation(body: models.Endpoints):
         }}
     """
 
-    response = requests.post(url="http://graph:8080/otp/routers/default/index/graphql", json={"query": query})
+    response = requests.post(
+        url="http://graph:8080/otp/routers/default/index/graphql", json={"query": query})
     return response.json()
 
 
@@ -644,6 +661,47 @@ async def get_bus_gps() -> None:
     return None
 
 
+# Fetch access token if not already available or already stale
+async def tj_login():
+    global token
+
+    url = "http://esb.transjakarta.co.id/api/v2/auth/signin"
+
+    payload = json.dumps({
+        "username": os.environ.get("TJ_USERNAME"),
+        "password": os.environ.get("TJ_PASSWORD"),
+    })
+
+    headers = {
+        "api_key": os.environ.get("TJ_API_KEY"),
+        "Content-Type": "application/json",
+    }
+
+    response = requests.post(url, headers=headers, data=payload)
+    token = response.json()["accessToken"]
+
+
+# Fetch real-time GPS data periodically
+async def tj_fetch():
+    global token
+
+    url = "http://esb.transjakarta.co.id/api/v2/gps/listGPSBusTripUI"
+    headers = {"x-access-token": token}
+    response = requests.get(url, headers=headers)
+
+    if response.status_code != 200:
+        raise Exception()
+
+    data = response.json()
+
+
+async def poll_api():
+    try:
+        await tj_fetch()
+    except:
+        await tj_login()
+
+
 def get_opposite_trip(route: str, trip: str):
     opposite_trips = _trips[(_trips["route_id"] == route)
                             & (_trips["trip_id"] != trip)]
@@ -652,3 +710,11 @@ def get_opposite_trip(route: str, trip: str):
         return None
 
     return opposite_trips.iloc[0]["trip_id"]
+
+
+async def heartbeat():
+    await tj_login()
+
+    while True:
+        await poll_api()
+        await asyncio.sleep(5)
