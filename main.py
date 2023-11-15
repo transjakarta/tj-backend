@@ -18,6 +18,7 @@ from contextlib import asynccontextmanager
 from redis import Redis
 
 import models
+from eta.bus_eta_application import BusETAApplication
 
 
 load_dotenv()
@@ -36,11 +37,18 @@ psws_manager = PubSubWebSocketManager(
     redis_password=os.environ.get("REDIS_PASSWORD")
 )
 
+# Global variables
+token = ""
+eta_engine = None
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global eta_engine
+
     # Startup events
     redis.ping()
+    eta_engine = BusETAApplication('./eta/assets/')
     asyncio.create_task(heartbeat())
     yield
 
@@ -49,10 +57,6 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
-
-
-# Global variables
-token = ""
 
 
 # GTFS dataframes
@@ -478,201 +482,6 @@ async def websocket_bus_gps(websocket: WebSocket, bus_code: str) -> None:
         await psws_manager.disconnect_from_channel(channel, websocket)
 
 
-@app.get("/bus/gps")
-async def get_bus_gps() -> None:
-    # fetch bus gps data
-
-    # preprocess data
-
-    # predict eta
-    predicted_eta = {
-        "MYS23375": None,
-        "TJ0843": {
-            "B02017P": 101.06355667114258,
-            "B03078P": 137.54007148742676,
-            "B02470P": 170.0546760559082,
-            "B00693P": 193.9820556640625,
-            "B02160P": 236.48881912231445,
-            "B02647P": 288.22187995910645,
-            "B05716P": 323.5605945587158,
-            "B02278P": 374.0245876312256,
-            "B01581P": 414.91749000549316,
-            "B00185P": 441.18727111816406,
-            "B02892P": 459.1596784591675,
-            "B00231P": 482.5269184112549,
-            "B00731P": 508.31426429748535,
-            "B00337P": 528.875394821167,
-            "B02921P": 547.914776802063,
-            "B02300P": 581.7295656204224,
-            "B02982P": 636.2539739608765,
-            "B00683P": 668.446683883667,
-            "B03183P": 686.9114837646484,
-            "B02393P": 728.6144218444824,
-            "B02562P": 781.4506721496582,
-            "B05686P": 816.512882232666,
-            "B05836P": 859.780029296875,
-            "B02045P": 887.4479713439941,
-            "B02426P": 916.8913145065308,
-            "B01889P": 938.9977750778198,
-            "B04573P": 979.9901838302612,
-            "B00105P": 1013.0730657577515,
-            "B02553P": 1048.428708076477,
-            "B01753P": 1083.4766302108765,
-            "B03334P": 1115.6089544296265,
-            "B03126P": 1136.7423858642578,
-            "B02342P": 1171.3638591766357,
-            "B02456P": 1214.3314151763916,
-            "P00257": 1386.4140338897705,
-            "G00639": 1581.9419269561768,
-            "B00799P": 1666.6671772003174,
-            "B03304P": 1707.9064903259277,
-            "B01567P": 1743.8742218017578,
-            "B00025P": 1792.2513332366943,
-            "B01550P": 1828.1307964324951,
-            "P00275": 1858.7412204742432,
-            "B05398P": 1893.7748336791992,
-            "B05685P": 1931.4798984527588,
-            "B05803P": 1973.134744644165,
-            "B01888P": 2014.5241661071777,
-            "B02658P": 2050.5989627838135,
-            "B05835P": 2080.863712310791,
-            "B05649P": 2110.1886463165283,
-            "B02718P": 2146.0982551574707,
-            "B00667P": 2184.9868717193604,
-            "B03311P": 2233.029453277588,
-            "B02559P": 2255.597025871277,
-            "B02736P": 2292.7015409469604,
-            "B01449P": 2313.782431602478,
-            "B00938P": 2339.1432905197144,
-            "B02762P": 2364.7099809646606,
-            "B05296P": 2397.207622528076,
-            "B02918P": 2446.858034133911,
-            "B02532P": 2465.616506576538,
-            "B03616P": 2488.911533355713,
-            "B00907P": 2517.5468940734863,
-            "B05931P": 2542.021020889282,
-            "B05874P": 2563.180486679077,
-            "B02277P": 2585.108917236328,
-            "B05494P": 2640.1093559265137,
-            "B02915P": 2774.1077156066895,
-        },
-        "TJ0516": {
-            "B05830P": 159.49011993408203,
-            "B05834P": 334.0459289550781,
-            "B05514P": 399.92786407470703,
-            "B04423P": 503.0145263671875,
-            "B00821P": 590.5544357299805,
-            "B05464P": 626.2329597473145,
-            "B01809P": 814.1040153503418,
-            "B01780P": 954.1394996643066,
-            "B02269P": 1055.5098915100098,
-            "B02134P": 1210.2096366882324,
-            "B05509P": 1258.8244018554688,
-            "B02017P": 1468.2365036010742,
-            "B03078P": 1571.0209579467773,
-            "B02470P": 1665.932487487793,
-            "B00693P": 1721.6584777832031,
-            "B02160P": 1841.640968322754,
-            "B02647P": 1922.9099502563477,
-            "B05716P": 1986.8824996948242,
-            "B02278P": 2141.8582305908203,
-            "B01581P": 2252.936424255371,
-            "B00185P": 2317.9829864501953,
-            "B02892P": 2364.1304626464844,
-            "B00231P": 2412.400520324707,
-            "B00731P": 2484.2641983032227,
-            "B00337P": 2556.1895294189453,
-            "B02921P": 2604.979202270508,
-            "B02300P": 2707.1710815429688,
-            "B02982P": 2811.044536590576,
-            "B00683P": 2895.588840484619,
-            "B03183P": 2954.9867515563965,
-            "B02393P": 3074.306968688965,
-            "B02562P": 3204.5052642822266,
-            "B05686P": 3268.2637367248535,
-            "B05836P": 3392.4420051574707,
-            "B02045P": 3450.930896759033,
-            "B02426P": 3515.213405609131,
-            "B01889P": 3556.7533531188965,
-            "B04573P": 3641.8804969787598,
-            "B00105P": 3719.7786445617676,
-            "B02553P": 3794.456325531006,
-            "B01753P": 3902.439556121826,
-            "B03334P": 3958.346076965332,
-            "B03126P": 3993.139793395996,
-            "B02342P": 4072.2980422973633,
-            "B02456P": 4160.561683654785,
-            "P00257": 4569.319557189941,
-            "G00639": 4922.3090896606445,
-            "B00799P": 5179.1960372924805,
-            "B03304P": 5248.251708984375,
-            "B01567P": 5311.629821777344,
-            "B00025P": 5426.066589355469,
-            "B01550P": 5483.4630699157715,
-            "P00275": 5545.9435386657715,
-            "B05398P": 5604.5657958984375,
-            "B05685P": 5686.842758178711,
-            "B05803P": 5776.651832580566,
-            "B01888P": 5872.400657653809,
-            "B02658P": 5953.749977111816,
-            "B05835P": 6015.725605010986,
-            "B05649P": 6076.37121963501,
-            "B02718P": 6161.527156829834,
-            "B00667P": 6235.701961517334,
-            "B03311P": 6323.397441864014,
-            "B02559P": 6367.6547927856445,
-            "B02736P": 6457.354400634766,
-            "B01449P": 6528.860000610352,
-            "B00938P": 6603.879737854004,
-            "B02762P": 6663.041961669922,
-            "B05296P": 6730.44197845459,
-            "B02918P": 6830.321422576904,
-            "B02532P": 6862.480911254883,
-            "B03616P": 6937.688400268555,
-            "B00907P": 7032.581619262695,
-            "B05931P": 7098.364601135254,
-            "B05874P": 7163.542503356934,
-            "B02277P": 7258.633583068848,
-            "B05494P": 7428.571350097656,
-            "B02915P": 7701.520751953125,
-            "B00374P": 7941.789039611816,
-            "B05508P": 8116.368896484375,
-            "B05680P": 8167.056465148926,
-            "B00726P": 8206.249969482422,
-            "B02916P": 8280.140983581543,
-            "B00491P": 8409.386276245117,
-            "B05408P": 8453.696102142334,
-            "B02133P": 8564.729206085205,
-            "B05612P": 8597.830978393555,
-            "B05463P": 8780.38990020752,
-            "B05881P": 8831.772388458252,
-            "B05266P": 8920.188343048096,
-            "B05259P": 9104.749172210693,
-        },
-    }
-
-    for bus_code, eta in predicted_eta.items():
-        channel = f"bus.{bus_code}"
-
-        # dummy data
-        data = {
-            "bus_code": bus_code,
-            "koridor": "4B",
-            "gpsdatetime": "19/09/2023 05:26:05",
-            "latitude": -6.312733,
-            "longitude": 106.883828,
-            "color": "PUTIH ORG",
-            "gpsheading": 262,
-            "gpsspeed": 3.7,
-            "eta": eta,
-        }
-
-        # broadcast to channel
-        await psws_manager.broadcast_to_channel(channel, json.dumps(data))
-
-    return None
-
-
 # Fetch access token if not already available or already stale
 async def tj_login():
     global token
@@ -705,34 +514,67 @@ async def tj_fetch():
         raise Exception()
 
     data = response.json()["data"]
-    df = pd.DataFrame.from_dict(data) \
-        .drop(columns=["color", "trip_desc"]) \
-        .rename(columns={
-            "bus_code": "id",
-            "koridor": "route_id",
-            "gpsdatetime": "timestamp",
-            "latitude": "lat",
-            "longitude": "lon",
-            "gpsheading": "head",
-            "gpsspeed": "speed"
-        })
-
-    print(df.head())
-    return df
+    return pd.DataFrame.from_dict(data)
 
 
-# Broadcast real-time GPS data
+# Broadcast real-time GPS data and save history
 async def broadcast_gps(df):
     for _, row in df.iterrows():
-        channel = f"bus.{row['id']}"
-        await psws_manager.broadcast_to_channel(channel, json.dumps(row.to_dict()))
+        channel = f"bus.{row['bus_code']}"
+
+        redis.lpush(channel, json.dumps(row.to_dict()))
+        redis.ltrim(channel, 0, 19)
+
+        await psws_manager.broadcast_to_channel(channel, json.dumps({
+            "id": row["bus_code"],
+            "route_id": row["koridor"],
+            "trip_id": row["trip_id"],
+            "timestamp": row["gpsdatetime"],
+            "lat": row["latitude"],
+            "lon": row["longitude"],
+            "head": row["gpsheading"],
+            "speed": row["gpsspeed"],
+        }))
+
+
+# Predict ETA for each bus based on GPS data
+async def predict_eta(df):
+    new_df = pd.DataFrame(columns=["bus_code", "koridor", "gpsdatetime", "latitude",
+                          "longitude", "color", "gpsheading", "gpsspeed", "is_new", "trip_id"])
+
+    for _, row in df.iterrows():
+        row["is_new"] = True
+        new_df = pd.concat([new_df, row.to_frame().T], ignore_index=True)
+
+        history_df = get_bus_history(row["bus_code"])
+        if history_df.shape[0] >= 10:
+            new_df = pd.concat([new_df, history_df], ignore_index=True)
+
+    new_df.reset_index(drop=True, inplace=True)
+    if new_df.groupby(["bus_code"]).count()["gpsdatetime"].max() < 10:
+        return
+
+    prediction = await eta_engine.predict_async(new_df)
+
+    for bus_id, stops in prediction.items():
+        if not stops:
+            continue
+
+        for stop_id, eta in stops.items():
+            stop_key = f"stop.{stop_id}"
+            value = json.dumps({"eta": eta, "bus_id": bus_id})
+
+            redis.hset(stop_key, bus_id, value)
 
 
 async def poll_api():
     try:
         df = await tj_fetch()
+        df = df.drop(columns=["trip_desc"])
         await broadcast_gps(df)
-    except:
+        await predict_eta(df)
+    except Exception as e:
+        print(e)
         await tj_login()
 
 
@@ -744,6 +586,31 @@ def get_opposite_trip(route: str, trip: str):
         return None
 
     return opposite_trips.iloc[0]["trip_id"]
+
+
+# Fetch latest bus history from redis
+def get_bus_history(bus_id):
+    channel = f"bus.{bus_id}"
+    entries = redis.lrange(channel, 0, 19)
+
+    history_dicts = [json.loads(entry) for entry in entries]
+    if history_dicts:
+        return pd.DataFrame(history_dicts)
+
+    return pd.DataFrame()
+
+
+# Fetch all ETA of a stop from redis
+def get_etas(stop_id):
+    stop_key = f"stop.{stop_id}"
+    etas = []
+
+    all_etas = redis.hgetall(stop_key)
+    for eta_info in all_etas.values():
+        etas.append(json.loads(eta_info))
+
+    etas.sort(key=lambda x: x["eta"])
+    return etas
 
 
 async def heartbeat():
