@@ -724,8 +724,8 @@ async def tj_fetch():
 # Broadcast real-time GPS data
 async def broadcast_gps(df):
     for _, row in df.iterrows():
-        channel = f"bus.{row['bus_code']}"
-        await psws_manager.broadcast_to_channel(channel, json.dumps(row))
+        channel = f"bus.{row['id']}"
+        await psws_manager.broadcast_to_channel(channel, json.dumps(row.to_dict()))
 
 
 async def poll_api():
