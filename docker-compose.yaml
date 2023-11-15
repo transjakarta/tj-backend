@@ -1,20 +1,20 @@
-version: '3.8'
+version: "3.8"
 services:
-  graph:
-    container_name: graph
-    volumes:
-      - ./graphs:/var/opentripplanner
-    image: docker.io/opentripplanner/opentripplanner:2.4.0
-    command: --load --serve
-    ports:
-      - 8080:8080
+  # graph:
+  #   container_name: graph
+  #   volumes:
+  #     - ./graphs:/var/opentripplanner
+  #   image: docker.io/opentripplanner/opentripplanner:2.4.0
+  #   command: --load --serve
+  #   ports:
+  #     - 8080:8080
 
   redis:
     container_name: redis
     image: redis:6.2-alpine
     restart: always
     ports:
-      - '6379:6379'
+      - "6379:6379"
     command: redis-server --save 20 1 --loglevel warning --requirepass tjredis
     volumes:
       - redis:/data
@@ -32,7 +32,7 @@ services:
       - 8000:8000
     depends_on:
       - redis
-      - graph
+      # - graph
     command: sh -c "uvicorn main:app --reload --host 0.0.0.0 --port 8000"
 
 volumes:

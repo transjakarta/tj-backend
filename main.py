@@ -15,8 +15,20 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from socket_manager import PubSubWebSocketManager
 from contextlib import asynccontextmanager
+from redis import Redis
 
 import models
+
+
+load_dotenv()
+
+redis = Redis(
+    db=0,
+    host=os.environ.get("REDIS_HOST"),
+    port=os.environ.get("REDIS_PORT"),
+    password=os.environ.get("REDIS_PASSWORD"),
+    decode_responses=True
+)
 
 psws_manager = PubSubWebSocketManager(
     redis_host=os.environ.get("REDIS_HOST"),
@@ -24,19 +36,19 @@ psws_manager = PubSubWebSocketManager(
     redis_password=os.environ.get("REDIS_PASSWORD")
 )
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup events
+    redis.ping()
     asyncio.create_task(heartbeat())
     yield
 
     # Shutdown events
-    psws_manager.close_subscribers()
+    await psws_manager.close_subscribers()
 
 
-load_dotenv()
 app = FastAPI(lifespan=lifespan)
-app.add_event_handler("shutdown", psws_manager.close_subscribers)
 
 
 # Global variables
@@ -692,12 +704,34 @@ async def tj_fetch():
     if response.status_code != 200:
         raise Exception()
 
-    data = response.json()
+    data = response.json()["data"]
+    df = pd.DataFrame.from_dict(data) \
+        .drop(columns=["color", "trip_desc"]) \
+        .rename(columns={
+            "bus_code": "id",
+            "koridor": "route_id",
+            "gpsdatetime": "timestamp",
+            "latitude": "lat",
+            "longitude": "lon",
+            "gpsheading": "head",
+            "gpsspeed": "speed"
+        })
+
+    print(df.head())
+    return df
+
+
+# Broadcast real-time GPS data
+async def broadcast_gps(df):
+    for _, row in df.iterrows():
+        channel = f"bus.{row['bus_code']}"
+        await psws_manager.broadcast_to_channel(channel, json.dumps(row))
 
 
 async def poll_api():
     try:
-        await tj_fetch()
+        df = await tj_fetch()
+        await broadcast_gps(df)
     except:
         await tj_login()
 
@@ -713,8 +747,11 @@ def get_opposite_trip(route: str, trip: str):
 
 
 async def heartbeat():
+    print("Heartbeat started")
     await tj_login()
 
     while True:
+        print(
+            f"Heartbeat received on {datetime.now().strftime('%Y/%m/%d, %H:%M:%S')}")
         await poll_api()
         await asyncio.sleep(5)
