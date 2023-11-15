@@ -1,24 +1,14 @@
 version: '3.8'
 services:
   graph:
-    image: urbica/otp
-    restart: unless-stopped
+    container_name: graph
+    volumes:
+      - ./graphs:/var/opentripplanner
+    image: docker.io/opentripplanner/opentripplanner:2.4.0
+    command: --load --serve
     ports:
       - 8080:8080
-    volumes:
-      - ./graphs:/var/otp/graphs
-    environment:
-      - JAVA_OPTIONS=-Xmx8G
-    command:
-      [
-        '--server',
-        '--maxThreads 4',
-        '--analyst',
-        '--autoScan',
-        '--insecure',
-        '--verbose',
-      ]
-      
+
   redis:
     container_name: redis
     image: redis:6.2-alpine
@@ -26,8 +16,9 @@ services:
     ports:
       - '6379:6379'
     command: redis-server --save 20 1 --loglevel warning --requirepass tjredis
-    volumes: 
+    volumes:
       - redis:/data
+
   app:
     container_name: server
     restart: always
@@ -43,6 +34,7 @@ services:
       - redis
       - graph
     command: sh -c "uvicorn main:app --reload --host 0.0.0.0 --port 8000"
+
 volumes:
   redis:
   ignore:
