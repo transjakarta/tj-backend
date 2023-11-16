@@ -18,6 +18,7 @@ from contextlib import asynccontextmanager
 from redis import Redis
 
 import models
+import utils
 from eta.bus_eta_application import BusETAApplication
 
 
@@ -468,6 +469,7 @@ async def get_navigation(body: models.Endpoints):
 
     response = requests.post(
         url="http://graph:8080/otp/routers/default/index/graphql", json={"query": query})
+
     return response.json()
 
 
@@ -475,20 +477,24 @@ async def get_navigation(body: models.Endpoints):
 async def websocket_bus_gps(websocket: WebSocket, bus_code: str) -> None:
     channel = f"bus.{bus_code}"
     await psws_manager.subscribe_to_channel(channel, websocket)
+
     try:
         while True:
-            await websocket.receive_text()  # wait for client to disconnect
+            await websocket.receive_text()
     except WebSocketDisconnect:
         await psws_manager.disconnect_from_channel(channel, websocket)
 
 
 @app.websocket("/trips/{trip_id}/ws")
 async def websocket_bus_gps(websocket: WebSocket, trip_id: str) -> None:
-    channel = f"trip.{trip_id}"
+    mapped_trip_id = utils.map_gtfs_trip(trip_id)
+
+    channel = f"trip.{mapped_trip_id}"
     await psws_manager.subscribe_to_channel(channel, websocket)
+
     try:
         while True:
-            await websocket.receive_text()  # wait for client to disconnect
+            await websocket.receive_text()
     except WebSocketDisconnect:
         await psws_manager.disconnect_from_channel(channel, websocket)
 
@@ -531,10 +537,6 @@ async def tj_fetch():
 # Broadcast real-time GPS data and save history
 async def broadcast_gps(df):
     async def broadcast_to_bus_channel(row):
-        channel = f"bus.{row['id']}"
-        await psws_manager.broadcast_to_channel(channel, json.dumps(row.to_dict()))
-
-    for _, row in df.iterrows():
         channel = f"bus.{row['bus_code']}"
 
         redis.lpush(channel, json.dumps(row.to_dict()))
@@ -559,9 +561,19 @@ async def broadcast_gps(df):
     for _, row in df.iterrows():
         tasks.append(broadcast_to_bus_channel(row))
 
-    df.loc[:, "trip_id"] = df["trip_id"].str.replace(".", "-")
-    for trip_id in df["trip_id"].unique():
-        rows = df[df["trip_id"] == trip_id]
+    renamed_df = df.drop(columns=["color"]) \
+        .rename(columns={
+            "bus_code": "id",
+            "koridor": "route_id",
+            "gpsdatetime": "timestamp",
+            "latitude": "lat",
+            "longitude": "lon",
+            "gpsheading": "head",
+            "gpsspeed": "speed"
+        })
+
+    for trip_id in renamed_df["trip_id"].unique():
+        rows = renamed_df[renamed_df["trip_id"] == trip_id]
         tasks.append(broadcast_to_trip_channel(trip_id, rows))
 
     await asyncio.gather(*tasks)
@@ -601,6 +613,9 @@ async def poll_api():
     try:
         df = await tj_fetch()
         df = df.drop(columns=["trip_desc"])
+        df["trip_id"] = df.apply(
+            lambda x: utils.map_gps_trip(x["trip_id"]), axis=1)
+
         await broadcast_gps(df)
         await predict_eta(df)
     except Exception as e:
