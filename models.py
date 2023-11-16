@@ -26,7 +26,7 @@ class Stop(Place):
 
 
 class StopEta(Stop):
-    eta: datetime | None = None
+    eta: float | None = None
 
 
 class Trip(BaseModel):

@@ -171,7 +171,13 @@ async def get_stops_by_route_id(trip_id: str, include_eta: bool = False) -> list
     merged = merged.sort_values(by=["stop_sequence"])
 
     if include_eta:
-        merged["eta"] = datetime.now().replace(microsecond=0).isoformat()
+        def try_get_eta(row):
+            try:
+                return get_etas(row["stop_id"])[0]["eta"]
+            except:
+                return None
+
+        merged["eta"] = merged.apply(try_get_eta, axis=1)
 
     merged = merged.rename(columns={
         "stop_id": "id",
