@@ -445,18 +445,13 @@ async def get_navigation(body: models.Endpoints):
                             name
                             lat
                             lon
-                            departureTime
-                            arrivalTime
                         }}
                         to {{
                             name
                             lat
                             lon
-                            departureTime
-                            arrivalTime
                         }}
                         route {{
-                            gtfsId
                             longName
                             shortName
                             stops {{
@@ -476,7 +471,25 @@ async def get_navigation(body: models.Endpoints):
     response = requests.post(
         url="http://graph:8080/otp/routers/default/index/graphql", json={"query": query})
 
-    return response.json()
+    data = response.json()
+    itineraries = data["data"]["plan"]["itineraries"]
+
+    for itinerary in itineraries:
+        for leg in itinerary["legs"]:
+            if leg["mode"] == "BUS" and "route" in leg and leg["route"]:
+                for stop in leg["route"]["stops"]:
+                    try:
+                        stop_id = stop["gtfsId"].split(":")[-1]
+                        eta = get_etas(stop_id)[0]["eta"]
+
+                        if eta:
+                            stop["eta"] = eta
+                    except:
+                        stop["eta"] = None
+
+                    del stop["gtfsId"]
+
+    return data
 
 
 @app.websocket("/bus/{bus_code}/ws")
