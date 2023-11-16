@@ -454,6 +454,9 @@ async def get_navigation(body: models.Endpoints):
                         route {{
                             longName
                             shortName
+                            trips {{
+                                gtfsId
+                            }}
                             stops {{
                                 gtfsId
                                 name
