@@ -482,6 +482,17 @@ async def websocket_bus_gps(websocket: WebSocket, bus_code: str) -> None:
         await psws_manager.disconnect_from_channel(channel, websocket)
 
 
+@app.websocket("/trips/{trip_id}/ws")
+async def websocket_bus_gps(websocket: WebSocket, trip_id: str) -> None:
+    channel = f"trip.{trip_id}"
+    await psws_manager.subscribe_to_channel(channel, websocket)
+    try:
+        while True:
+            await websocket.receive_text()  # wait for client to disconnect
+    except WebSocketDisconnect:
+        await psws_manager.disconnect_from_channel(channel, websocket)
+
+
 # Fetch access token if not already available or already stale
 async def tj_login():
     global token
@@ -519,6 +530,10 @@ async def tj_fetch():
 
 # Broadcast real-time GPS data and save history
 async def broadcast_gps(df):
+    async def broadcast_to_bus_channel(row):
+        channel = f"bus.{row['id']}"
+        await psws_manager.broadcast_to_channel(channel, json.dumps(row.to_dict()))
+
     for _, row in df.iterrows():
         channel = f"bus.{row['bus_code']}"
 
@@ -535,6 +550,21 @@ async def broadcast_gps(df):
             "head": row["gpsheading"],
             "speed": row["gpsspeed"],
         }))
+
+    async def broadcast_to_trip_channel(trip_id, rows):
+        channel = f"trip.{trip_id}"
+        await psws_manager.broadcast_to_channel(channel, json.dumps(rows.to_dict(('records'))))
+
+    tasks = []
+    for _, row in df.iterrows():
+        tasks.append(broadcast_to_bus_channel(row))
+
+    df.loc[:, "trip_id"] = df["trip_id"].str.replace(".", "-")
+    for trip_id in df["trip_id"].unique():
+        rows = df[df["trip_id"] == trip_id]
+        tasks.append(broadcast_to_trip_channel(trip_id, rows))
+
+    await asyncio.gather(*tasks)
 
 
 # Predict ETA for each bus based on GPS data
