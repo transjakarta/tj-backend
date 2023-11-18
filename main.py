@@ -439,6 +439,8 @@ async def get_navigation(body: models.Endpoints):
                     endTime
                     legs {{
                         mode
+                        duration
+                        distance
                         startTime
                         endTime
                         from {{
@@ -558,7 +560,7 @@ async def tj_fetch():
 
 def prediction_preprocess(df):
     new_df = pd.DataFrame(columns=["bus_code", "koridor", "gpsdatetime", "latitude",
-                    "longitude", "color", "gpsheading", "gpsspeed", "is_new", "trip_id"])
+                                   "longitude", "color", "gpsheading", "gpsspeed", "is_new", "trip_id"])
     for _, row in df.iterrows():
         row["is_new"] = True
         new_df = pd.concat([new_df, row.to_frame().T], ignore_index=True)
@@ -568,6 +570,7 @@ def prediction_preprocess(df):
             new_df = pd.concat([new_df, history_df], ignore_index=True)
     new_df.reset_index(drop=True, inplace=True)
     return new_df
+
 
 def get_prev_next_stops(df):
     new_df = prediction_preprocess(df)
@@ -579,14 +582,18 @@ def get_prev_next_stops(df):
         gps = eta_engine.data_preprocessor.preprocess_gps_data(gps)
         gps = eta_engine.determine_following_route(gps)
         gps = eta_engine.determine_trip(gps)
-        gps = eta_engine.calculate_prev_next_stops(gps) # new cols: "next_stop", "prev_stop", "next_stop_seq", "prev_stop_seq"]
+        # new cols: "next_stop", "prev_stop", "next_stop_seq", "prev_stop_seq"]
+        gps = eta_engine.calculate_prev_next_stops(gps)
         gps = gps[gps['is_new'] == True]
-        next_stop_name = _stops.loc[_stops['stop_id'] == gps['next_stop'].values[0], 'stop_name'].values[0]
-        prev_stop_name = _stops.loc[_stops['stop_id'] == gps['prev_stop'].values[0], 'stop_name'].values[0]
+        next_stop_name = _stops.loc[_stops['stop_id'] ==
+                                    gps['next_stop'].values[0], 'stop_name'].values[0]
+        prev_stop_name = _stops.loc[_stops['stop_id'] ==
+                                    gps['prev_stop'].values[0], 'stop_name'].values[0]
         df.loc[df['bus_code'] == bus, 'next_stop'] = next_stop_name
         df.loc[df['bus_code'] == bus, 'prev_stop'] = prev_stop_name
 
     return df
+
 
 # Broadcast real-time GPS data and save history
 async def broadcast_gps(df):
@@ -616,7 +623,7 @@ async def broadcast_gps(df):
         tasks.append(broadcast_to_bus_channel(row))
 
     df = get_prev_next_stops(df)
-    
+
     renamed_df = df.drop(columns=["color"]) \
         .rename(columns={
             "bus_code": "id",
