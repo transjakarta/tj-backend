@@ -36,3 +36,11 @@ def convert_seconds_to_isostring(seconds: float) -> str:
     eta_time = datetime.now() + eta_duration
 
     return eta_time.isoformat()
+
+
+# Conver epoch in milliseconds to ISO string
+def convert_epoch_to_isostring(epoch: int) -> str:
+    epoch_seconds = epoch / 1000
+    timestamp = datetime.utcfromtimestamp(epoch_seconds)
+
+    return timestamp.isoformat()

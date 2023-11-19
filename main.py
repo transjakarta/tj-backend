@@ -476,7 +476,13 @@ async def get_navigation(body: models.Endpoints):
     itineraries = data["data"]["plan"]["itineraries"]
 
     for itinerary in itineraries:
+        itinerary["startTime"] = utils.convert_epoch_to_isostring(itinerary["startTime"])
+        itinerary["endTime"] = utils.convert_epoch_to_isostring(itinerary["endTime"])
+
         for leg in itinerary["legs"]:
+            leg["startTime"] = utils.convert_epoch_to_isostring(leg["startTime"])
+            leg["endTime"] = utils.convert_epoch_to_isostring(leg["endTime"])
+
             if leg["mode"] == "BUS" and "route" in leg and leg["route"]:
                 for stop in leg["route"]["stops"]:
                     try:
