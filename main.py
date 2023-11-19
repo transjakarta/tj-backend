@@ -424,15 +424,11 @@ async def get_places_by_ids(body: models.GetPlacesByIdBody) -> list[models.Place
 
 @app.post("/navigate")
 async def get_navigation(body: models.Endpoints):
-    now = datetime.now()
     query = f"""
         query Navigate {{
             plan(
                 from: {{lat: {body.origin_lat}, lon: {body.origin_lon}}}
                 to: {{lat: {body.destination_lat}, lon: {body.destination_lon}}}
-                date: "{now.strftime("%Y-%m-%d")}"
-                time: "{now.strftime("%H:%M")}"
-                transportModes: [{{mode: WALK}}, {{mode: TRANSIT}}]
             ) {{
                 itineraries {{
                     startTime
