@@ -656,7 +656,9 @@ async def predict_eta(df):
 
         for stop_id, eta in stops.items():
             stop_key = f"stop.{stop_id}"
-            value = json.dumps({"eta": eta, "bus_id": bus_id})
+            eta_timestamp = utils.convert_seconds_to_isostring(eta)
+
+            value = json.dumps({"eta": eta_timestamp, "bus_id": bus_id})
 
             redis.hset(stop_key, bus_id, value)
 

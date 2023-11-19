@@ -1,3 +1,6 @@
+from datetime import datetime, timedelta
+
+
 # Map GPS trip data to GTFS trip id
 def map_gps_trip(trip_id: str) -> str:
     mapper = {
@@ -10,6 +13,7 @@ def map_gps_trip(trip_id: str) -> str:
     if trip_id in mapper:
         return mapper[trip_id]
     return None
+
 
 # Map GTFS trip id to available trip data
 def map_gtfs_trip(trip_id: str) -> str:
@@ -25,3 +29,10 @@ def map_gtfs_trip(trip_id: str) -> str:
         return mapper[trip_id]
     return None
 
+
+# Convert delta time in seconds to ISO string
+def convert_seconds_to_isostring(seconds: float) -> str:
+    eta_duration = timedelta(seconds=seconds)
+    eta_time = datetime.now() + eta_duration
+
+    return eta_time.isoformat()

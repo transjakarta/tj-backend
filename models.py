@@ -26,7 +26,7 @@ class Stop(Place):
 
 
 class StopEta(Stop):
-    eta: float | None = None
+    eta: str | None = None
 
 
 class Trip(BaseModel):
