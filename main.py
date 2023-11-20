@@ -473,11 +473,15 @@ async def get_navigation(body: models.Endpoints):
 
     response = requests.post(
         url="http://graph:8080/otp/routers/default/index/graphql", json={"query": query})
-
     data = response.json()
-    itineraries = data["data"]["plan"]["itineraries"]
 
-    for itinerary in itineraries:
+    itineraries = data["data"]["plan"]["itineraries"]
+    valid_itineraries = [itinerary
+                         for itinerary in itineraries
+                         for leg in itinerary["legs"]
+                         if leg["mode"] == "BUS"]
+
+    for itinerary in valid_itineraries:
         itinerary["startTime"] = utils.convert_epoch_to_isostring(
             itinerary["startTime"])
         itinerary["endTime"] = utils.convert_epoch_to_isostring(
@@ -521,6 +525,7 @@ async def get_navigation(body: models.Endpoints):
 
                 leg["trip"]["stops"] = stops
 
+    data["data"]["plan"]["itineraries"] = valid_itineraries
     return data
 
 
