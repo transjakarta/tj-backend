@@ -508,6 +508,8 @@ async def get_navigation(body: models.Endpoints):
                         stops += [stop]
 
                 for stop in stops:
+                    stop_id = stop["gtfsId"].split(":")[-1]
+
                     try:
                         eta = get_etas(stop_id)[0]["eta"]
                         if eta:
