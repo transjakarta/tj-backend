@@ -443,18 +443,20 @@ async def get_navigation(body: models.Endpoints):
                             name
                             lat
                             lon
+                            stop {{
+                                gtfsId
+                            }}
                         }}
                         to {{
                             name
                             lat
                             lon
-                        }}
-                        route {{
-                            longName
-                            shortName
-                            trips {{
+                            stop {{
                                 gtfsId
                             }}
+                        }}
+                        trip {{
+                            gtfsId
                             stops {{
                                 gtfsId
                                 name
@@ -476,25 +478,46 @@ async def get_navigation(body: models.Endpoints):
     itineraries = data["data"]["plan"]["itineraries"]
 
     for itinerary in itineraries:
-        itinerary["startTime"] = utils.convert_epoch_to_isostring(itinerary["startTime"])
-        itinerary["endTime"] = utils.convert_epoch_to_isostring(itinerary["endTime"])
+        itinerary["startTime"] = utils.convert_epoch_to_isostring(
+            itinerary["startTime"])
+        itinerary["endTime"] = utils.convert_epoch_to_isostring(
+            itinerary["endTime"])
 
         for leg in itinerary["legs"]:
-            leg["startTime"] = utils.convert_epoch_to_isostring(leg["startTime"])
+            leg["startTime"] = utils.convert_epoch_to_isostring(
+                leg["startTime"])
             leg["endTime"] = utils.convert_epoch_to_isostring(leg["endTime"])
 
-            if leg["mode"] == "BUS" and "route" in leg and leg["route"]:
-                for stop in leg["route"]["stops"]:
-                    try:
-                        stop_id = stop["gtfsId"].split(":")[-1]
-                        eta = get_etas(stop_id)[0]["eta"]
+            if leg["mode"] == "BUS" and "trip" in leg and leg["trip"]:
+                origin_stop = leg["from"]["stop"]["gtfsId"].split(":")[-1]
+                destination_stop = leg["to"]["stop"]["gtfsId"].split(":")[-1]
 
+                # Whether we have passed the origin / destination stop or not
+                stop_passed = False
+                stops = []
+
+                for stop in leg["trip"]["stops"]:
+                    stop_id = stop["gtfsId"].split(":")[-1]
+
+                    if stop_passed:
+                        stops += [stop]
+                        if stop_id == destination_stop:
+                            stop_passed = False
+                    elif stop_id == origin_stop:
+                        stop_passed = True
+                        stops += [stop]
+
+                for stop in stops:
+                    try:
+                        eta = get_etas(stop_id)[0]["eta"]
                         if eta:
                             stop["eta"] = eta
                     except:
                         stop["eta"] = None
 
                     del stop["gtfsId"]
+
+                leg["trip"]["stops"] = stops
 
     return data
 
