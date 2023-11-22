@@ -700,7 +700,6 @@ async def predict_eta(df):
             value = json.dumps({"eta": eta_timestamp, "bus_id": bus_id})
 
             redis.hset(stop_key, bus_id, value)
-            set_expired(stop_key)
 
 
 async def poll_api():
@@ -715,6 +714,21 @@ async def poll_api():
     except Exception as e:
         print(e)
         await tj_login()
+
+
+async def prune_trip_eta():
+    now = datetime.now()
+    stops = redis.keys("stop.*")
+    
+    for stop in stops:
+        etas = redis.hgetall(stop)
+        
+        for bus, value in etas.items():
+            eta_str = json.loads(value)["eta"]
+            eta = datetime.fromisoformat(eta_str)
+
+            if eta < now:
+                redis.hdel(stop, bus)
 
 
 def get_opposite_trip(route: str, trip: str):
@@ -771,6 +785,7 @@ async def heartbeat():
             print(
                 f"Heartbeat received on {current_time.strftime('%Y/%m/%d, %H:%M:%S')}")
             await poll_api()
+            await prune_trip_eta()
         else:
             print(
                 f"Skipping heartbeat during off hours: {current_time.strftime('%Y/%m/%d, %H:%M:%S')}")
