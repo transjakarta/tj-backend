@@ -276,16 +276,18 @@ async def get_place_by_distance_or_query(
         "stop_lon": "lon",
     })
 
-    # Sort stops by distance if coordinate is provided
-    if lat and lon:
-        stops["distance"] = stops.apply(
-            lambda row: geodesic((lat, lon), (row["lat"], row["lon"])).km,
-            axis=1
-        )
-        stops = stops.sort_values(by=["distance"])
+    places = stops
+    if len(stops) > 0:
+        # Sort stops by distance if coordinate is provided
+        if lat and lon:
+            stops["distance"] = stops.apply(
+                lambda row: geodesic((lat, lon), (row["lat"], row["lon"])).km,
+                axis=1
+            )
+            stops = stops.sort_values(by=["distance"])
 
-    # Limit to top 10
-    places = stops.head(10)
+        # Limit to top 10
+        places = stops.head(10)
 
     if query:
         url = "https://places.googleapis.com/v1/places:searchText"
