@@ -478,9 +478,9 @@ async def get_navigation(body: models.Endpoints):
     """
 
     response = requests.post(
-        url="http://graph:8080/otp/routers/default/index/graphql", 
+        url="http://graph:8080/otp/routers/default/index/graphql",
         json={"query": query})
-    
+
     data = response.json()
 
     itineraries = data["data"]["plan"]["itineraries"]
@@ -519,13 +519,19 @@ async def get_navigation(body: models.Endpoints):
                         stop_passed = True
                         stops += [stop]
 
+                bus = None
                 for stop in stops:
                     stop_id = stop["gtfsId"].split(":")[-1]
 
                     try:
-                        eta = get_etas(stop_id)[0]["eta"]
+                        eta_data = get_etas(stop_id, bus)[0]
+                        eta = eta_data["eta"]
+
                         if eta:
                             stop["eta"] = eta
+
+                            if not bus:
+                                bus = eta_data["bus_id"]
                     except:
                         stop["eta"] = None
 
@@ -721,10 +727,10 @@ async def poll_api():
 async def prune_trip_eta():
     now = datetime.now()
     stops = redis.keys("stop.*")
-    
+
     for stop in stops:
         etas = redis.hgetall(stop)
-        
+
         for bus, value in etas.items():
             eta_str = json.loads(value)["eta"]
             eta = datetime.fromisoformat(eta_str)
@@ -756,9 +762,12 @@ def get_bus_history(bus_id):
 
 
 # Fetch all ETA of a stop from redis
-def get_etas(stop_id):
+def get_etas(stop_id, bus_id=None):
     stop_key = f"stop.{stop_id}"
     etas = []
+
+    if bus_id:
+        return [json.loads(redis.hget(stop_key, bus_id))]
 
     all_etas = redis.hgetall(stop_key)
     for eta_info in all_etas.values():
