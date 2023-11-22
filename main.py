@@ -291,7 +291,8 @@ async def get_place_by_distance_or_query(
             "X-Goog-FieldMask": ",".join([
                 "places.displayName",
                 "places.id",
-                *(["places.location"] if lat and lon else [])
+                "places.formattedAddress",
+                "places.location"
             ])
         }
 
@@ -315,6 +316,11 @@ async def get_place_by_distance_or_query(
 
         google_places["name"] = google_places["displayName"] \
             .apply(lambda x: x["text"])
+        google_places["lat"] = google_places["location"] \
+            .apply(lambda x: x["latitude"])
+        google_places["lon"] = google_places["location"] \
+            .apply(lambda x: x["longitude"])
+        google_places.rename(columns={"formattedAddress": "address"}, inplace=True)
         google_places["is_stop"] = False
 
         if lat and lon:

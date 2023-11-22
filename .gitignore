@@ -1,5 +1,6 @@
 .venv
 env*
 .env
+graphs/*
 __pycache__
 .DS_Store
