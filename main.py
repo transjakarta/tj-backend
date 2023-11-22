@@ -7,6 +7,7 @@ import asyncio
 import gtfs_kit as gk
 from geopy.distance import geodesic
 
+from copy import deepcopy
 from json import loads
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -475,24 +476,26 @@ async def get_navigation(body: models.Endpoints):
     """
 
     response = requests.post(
-        url="http://graph:8080/otp/routers/default/index/graphql", json={"query": query})
+        url="http://graph:8080/otp/routers/default/index/graphql", 
+        json={"query": query})
+    
     data = response.json()
 
     itineraries = data["data"]["plan"]["itineraries"]
-    valid_itineraries = [itinerary
+    valid_itineraries = [deepcopy(itinerary)
                          for itinerary in itineraries
                          for leg in itinerary["legs"]
                          if leg["mode"] == "BUS"]
 
     for itinerary in valid_itineraries:
-        itinerary["startTime"] = utils.convert_epoch_to_isostring(
-            itinerary["startTime"])
-        itinerary["endTime"] = utils.convert_epoch_to_isostring(
-            itinerary["endTime"])
+        itinerary["startTime"] = utils \
+            .convert_epoch_to_isostring(itinerary["startTime"])
+        itinerary["endTime"] = utils \
+            .convert_epoch_to_isostring(itinerary["endTime"])
 
         for leg in itinerary["legs"]:
-            leg["startTime"] = utils.convert_epoch_to_isostring(
-                leg["startTime"])
+            leg["startTime"] = utils \
+                .convert_epoch_to_isostring(leg["startTime"])
             leg["endTime"] = utils.convert_epoch_to_isostring(leg["endTime"])
 
             if leg["mode"] == "BUS" and "trip" in leg and leg["trip"]:
