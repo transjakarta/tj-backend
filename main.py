@@ -7,9 +7,12 @@ import asyncio
 import gtfs_kit as gk
 from geopy.distance import geodesic
 
+from copy import deepcopy
 from json import loads
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
+import pytz
+
 from dotenv import load_dotenv
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -41,6 +44,7 @@ psws_manager = PubSubWebSocketManager(
 # Global variables
 token = ""
 eta_engine = None
+timezone = pytz.timezone("Asia/Jakarta")
 
 
 @asynccontextmanager
@@ -272,16 +276,18 @@ async def get_place_by_distance_or_query(
         "stop_lon": "lon",
     })
 
-    # Sort stops by distance if coordinate is provided
-    if lat and lon:
-        stops["distance"] = stops.apply(
-            lambda row: geodesic((lat, lon), (row["lat"], row["lon"])).km,
-            axis=1
-        )
-        stops = stops.sort_values(by=["distance"])
+    places = stops
+    if len(stops) > 0:
+        # Sort stops by distance if coordinate is provided
+        if lat and lon:
+            stops["distance"] = stops.apply(
+                lambda row: geodesic((lat, lon), (row["lat"], row["lon"])).km,
+                axis=1
+            )
+            stops = stops.sort_values(by=["distance"])
 
-    # Limit to top 10
-    places = stops.head(10)
+        # Limit to top 10
+        places = stops.head(10)
 
     if query:
         url = "https://places.googleapis.com/v1/places:searchText"
@@ -449,18 +455,20 @@ async def get_navigation(body: models.Endpoints):
                             name
                             lat
                             lon
+                            stop {{
+                                gtfsId
+                            }}
                         }}
                         to {{
                             name
                             lat
                             lon
-                        }}
-                        route {{
-                            longName
-                            shortName
-                            trips {{
+                            stop {{
                                 gtfsId
                             }}
+                        }}
+                        trip {{
+                            gtfsId
                             stops {{
                                 gtfsId
                                 name
@@ -476,32 +484,68 @@ async def get_navigation(body: models.Endpoints):
     """
 
     response = requests.post(
-        url="http://graph:8080/otp/routers/default/index/graphql", json={"query": query})
+        url="http://graph:8080/otp/routers/default/index/graphql",
+        json={"query": query})
 
     data = response.json()
-    itineraries = data["data"]["plan"]["itineraries"]
 
-    for itinerary in itineraries:
-        itinerary["startTime"] = utils.convert_epoch_to_isostring(itinerary["startTime"])
-        itinerary["endTime"] = utils.convert_epoch_to_isostring(itinerary["endTime"])
+    itineraries = data["data"]["plan"]["itineraries"]
+    valid_itineraries = [deepcopy(itinerary)
+                         for itinerary in itineraries
+                         for leg in itinerary["legs"]
+                         if leg["mode"] == "BUS"]
+
+    for itinerary in valid_itineraries:
+        itinerary["startTime"] = utils \
+            .convert_epoch_to_isostring(itinerary["startTime"])
+        itinerary["endTime"] = utils \
+            .convert_epoch_to_isostring(itinerary["endTime"])
 
         for leg in itinerary["legs"]:
-            leg["startTime"] = utils.convert_epoch_to_isostring(leg["startTime"])
+            leg["startTime"] = utils \
+                .convert_epoch_to_isostring(leg["startTime"])
             leg["endTime"] = utils.convert_epoch_to_isostring(leg["endTime"])
 
-            if leg["mode"] == "BUS" and "route" in leg and leg["route"]:
-                for stop in leg["route"]["stops"]:
+            if leg["mode"] == "BUS" and "trip" in leg and leg["trip"]:
+                origin_stop = leg["from"]["stop"]["gtfsId"].split(":")[-1]
+                destination_stop = leg["to"]["stop"]["gtfsId"].split(":")[-1]
+
+                # Whether we have passed the origin / destination stop or not
+                stop_passed = False
+                stops = []
+
+                for stop in leg["trip"]["stops"]:
+                    stop_id = stop["gtfsId"].split(":")[-1]
+
+                    if stop_passed:
+                        stops += [stop]
+                        if stop_id == destination_stop:
+                            stop_passed = False
+                    elif stop_id == origin_stop:
+                        stop_passed = True
+                        stops += [stop]
+
+                bus = None
+                for stop in stops:
+                    stop_id = stop["gtfsId"].split(":")[-1]
+
                     try:
-                        stop_id = stop["gtfsId"].split(":")[-1]
-                        eta = get_etas(stop_id)[0]["eta"]
+                        eta_data = get_etas(stop_id, bus)[0]
+                        eta = eta_data["eta"]
 
                         if eta:
                             stop["eta"] = eta
+
+                            if not bus:
+                                bus = eta_data["bus_id"]
                     except:
                         stop["eta"] = None
 
                     del stop["gtfsId"]
 
+                leg["trip"]["stops"] = stops
+
+    data["data"]["plan"]["itineraries"] = valid_itineraries
     return data
 
 
@@ -610,6 +654,7 @@ async def broadcast_gps(df):
 
         redis.lpush(channel, json.dumps(row.to_dict()))
         redis.ltrim(channel, 0, 19)
+        set_expired(channel)
 
         await psws_manager.broadcast_to_channel(channel, json.dumps({
             "id": row["bus_code"],
@@ -685,6 +730,21 @@ async def poll_api():
         await tj_login()
 
 
+async def prune_trip_eta():
+    now = datetime.now()
+    stops = redis.keys("stop.*")
+
+    for stop in stops:
+        etas = redis.hgetall(stop)
+
+        for bus, value in etas.items():
+            eta_str = json.loads(value)["eta"]
+            eta = datetime.fromisoformat(eta_str)
+
+            if eta < now:
+                redis.hdel(stop, bus)
+
+
 def get_opposite_trip(route: str, trip: str):
     opposite_trips = _trips[(_trips["route_id"] == route)
                             & (_trips["trip_id"] != trip)]
@@ -708,9 +768,12 @@ def get_bus_history(bus_id):
 
 
 # Fetch all ETA of a stop from redis
-def get_etas(stop_id):
+def get_etas(stop_id, bus_id=None):
     stop_key = f"stop.{stop_id}"
     etas = []
+
+    if bus_id:
+        return [json.loads(redis.hget(stop_key, bus_id))]
 
     all_etas = redis.hgetall(stop_key)
     for eta_info in all_etas.values():
@@ -720,12 +783,28 @@ def get_etas(stop_id):
     return etas
 
 
+# Set default expire at 1am the next day
+def set_expired(key: str):
+    now = datetime.now(timezone)
+    expiry = datetime(now.year, now.month, now.day, 1, 0) + timedelta(days=1)
+
+    redis.expireat(key, expiry)
+
+
 async def heartbeat():
     print("Heartbeat started")
     await tj_login()
 
     while True:
-        print(
-            f"Heartbeat received on {datetime.now().strftime('%Y/%m/%d, %H:%M:%S')}")
-        await poll_api()
+        current_time = datetime.now(timezone)
+
+        if not (1 <= current_time.hour < 5):
+            print(
+                f"Heartbeat received on {current_time.strftime('%Y/%m/%d, %H:%M:%S')}")
+            await poll_api()
+            await prune_trip_eta()
+        else:
+            print(
+                f"Skipping heartbeat during off hours: {current_time.strftime('%Y/%m/%d, %H:%M:%S')}")
+
         await asyncio.sleep(5)
