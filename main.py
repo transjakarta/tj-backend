@@ -9,7 +9,9 @@ from geopy.distance import geodesic
 
 from json import loads
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
+import pytz
+
 from dotenv import load_dotenv
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -41,6 +43,7 @@ psws_manager = PubSubWebSocketManager(
 # Global variables
 token = ""
 eta_engine = None
+timezone = pytz.timezone("Asia/Jakarta")
 
 
 @asynccontextmanager
@@ -634,6 +637,7 @@ async def broadcast_gps(df):
 
         redis.lpush(channel, json.dumps(row.to_dict()))
         redis.ltrim(channel, 0, 19)
+        set_expired(channel)
 
         await psws_manager.broadcast_to_channel(channel, json.dumps({
             "id": row["bus_code"],
@@ -693,6 +697,7 @@ async def predict_eta(df):
             value = json.dumps({"eta": eta_timestamp, "bus_id": bus_id})
 
             redis.hset(stop_key, bus_id, value)
+            set_expired(stop_key)
 
 
 async def poll_api():
@@ -744,12 +749,27 @@ def get_etas(stop_id):
     return etas
 
 
+# Set default expire at 1am the next day
+def set_expired(key: str):
+    now = datetime.now(timezone)
+    expiry = datetime(now.year, now.month, now.day, 1, 0) + timedelta(days=1)
+
+    redis.expireat(key, expiry)
+
+
 async def heartbeat():
     print("Heartbeat started")
     await tj_login()
 
     while True:
-        print(
-            f"Heartbeat received on {datetime.now().strftime('%Y/%m/%d, %H:%M:%S')}")
-        await poll_api()
+        current_time = datetime.now(timezone)
+
+        if not (1 <= current_time.hour < 5):
+            print(
+                f"Heartbeat received on {current_time.strftime('%Y/%m/%d, %H:%M:%S')}")
+            await poll_api()
+        else:
+            print(
+                f"Skipping heartbeat during off hours: {current_time.strftime('%Y/%m/%d, %H:%M:%S')}")
+
         await asyncio.sleep(5)
