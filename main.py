@@ -1,9 +1,10 @@
 import os
-import pandas as pd
 import requests
 import json
 import asyncio
 
+import pandas as pd
+pd.set_option('display.max_columns', None)
 import gtfs_kit as gk
 from geopy.distance import geodesic
 
@@ -326,7 +327,11 @@ async def get_place_by_distance_or_query(
             .apply(lambda x: x["latitude"])
         google_places["lon"] = google_places["location"] \
             .apply(lambda x: x["longitude"])
-        google_places.rename(columns={"formattedAddress": "address"}, inplace=True)
+
+        google_places.rename(
+            columns={"formattedAddress": "address"},
+            inplace=True)
+
         google_places["is_stop"] = False
 
         if lat and lon:
@@ -610,7 +615,8 @@ async def tj_fetch():
     return pd.DataFrame.from_dict(data)
 
 
-def prediction_preprocess(df):
+# Append historical data to each bus data points
+def append_history(df):
     new_df = pd.DataFrame(columns=["bus_code", "koridor", "gpsdatetime", "latitude",
                                    "longitude", "color", "gpsheading", "gpsspeed", "is_new", "trip_id"])
     for _, row in df.iterrows():
@@ -620,29 +626,35 @@ def prediction_preprocess(df):
         history_df = get_bus_history(row["bus_code"])
         if history_df.shape[0] >= 10:
             new_df = pd.concat([new_df, history_df], ignore_index=True)
+
     new_df.reset_index(drop=True, inplace=True)
     return new_df
 
 
-def get_prev_next_stops(df):
-    new_df = prediction_preprocess(df)
-    if new_df.groupby(["bus_code"]).count()["gpsdatetime"].max() < 10:
-        return df
+# Append previous and next stops data to each bus
+def append_bus_stops(df):
+    for bus in df["bus_code"].unique():
+        gps = df[df["bus_code"] == bus]
 
-    for bus in new_df['bus_code'].unique():
-        gps = new_df[new_df['bus_code'] == bus]
         gps = eta_engine.data_preprocessor.preprocess_gps_data(gps)
         gps = eta_engine.determine_following_route(gps)
         gps = eta_engine.determine_trip(gps)
-        # new cols: "next_stop", "prev_stop", "next_stop_seq", "prev_stop_seq"]
+
+        # New columns: "next_stop", "prev_stop", "next_stop_seq", "prev_stop_seq"]
         gps = eta_engine.calculate_prev_next_stops(gps)
-        gps = gps[gps['is_new'] == True]
-        next_stop_name = _stops.loc[_stops['stop_id'] ==
-                                    gps['next_stop'].values[0], 'stop_name'].values[0]
-        prev_stop_name = _stops.loc[_stops['stop_id'] ==
-                                    gps['prev_stop'].values[0], 'stop_name'].values[0]
-        df.loc[df['bus_code'] == bus, 'next_stop'] = next_stop_name
-        df.loc[df['bus_code'] == bus, 'prev_stop'] = prev_stop_name
+
+        next_stop_name = _stops.loc[
+            _stops["stop_id"] == gps["next_stop"].values[0],
+            "stop_name"
+        ].values[0]
+
+        prev_stop_name = _stops.loc[
+            _stops["stop_id"] == gps["prev_stop"].values[0],
+            "stop_name"
+        ].values[0]
+
+        df.loc[df["bus_code"] == bus, "next_stop"] = next_stop_name
+        df.loc[df["bus_code"] == bus, "prev_stop"] = prev_stop_name
 
     return df
 
@@ -675,7 +687,7 @@ async def broadcast_gps(df):
     for _, row in df.iterrows():
         tasks.append(broadcast_to_bus_channel(row))
 
-    df = get_prev_next_stops(df)
+    df = append_bus_stops(df)
 
     renamed_df = df.drop(columns=["color"]) \
         .rename(columns={
@@ -697,7 +709,7 @@ async def broadcast_gps(df):
 
 # Predict ETA for each bus based on GPS data
 async def predict_eta(df):
-    new_df = prediction_preprocess(df)
+    new_df = append_history(df)
     if new_df.groupby(["bus_code"]).count()["gpsdatetime"].max() < 10:
         return
 
