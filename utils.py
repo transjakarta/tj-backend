@@ -23,6 +23,7 @@ def map_gtfs_trip(trip_id: str) -> str:
         "9H-R04": "9H",
         "9H-R05": "9H",
         "D21-R01": "D21",
+        "D21-R02": "D21",
     }
 
     if trip_id in mapper:

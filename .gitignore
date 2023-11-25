@@ -1,6 +1,7 @@
 .venv
 env*
 .env
-graphs/*
+graphs/*.obj
+graphs/*.zip
 __pycache__
 .DS_Store
