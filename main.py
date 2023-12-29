@@ -20,14 +20,14 @@ from geopy.distance import geodesic
 from redis import Redis
 
 # Local application/library-specific import
-import gtfs_kit as gk
+import lib.gtfs_kit as gk
 import models
 import utils
 
 from eta.bus_eta_application import BusETAApplication
 from gtfs_manager import GTFSManager
 from gtfs_realtime_pb2 import FeedMessage
-from socket_manager import PubSubWebSocketManager
+from lib.socket_manager import PubSubWebSocketManager
 
 
 # Load environment variables from .env file
@@ -521,7 +521,7 @@ async def get_navigation(body: models.Endpoints):
 
 
 @app.websocket("/bus/{bus_code}/ws")
-async def websocket_bus_gps(websocket: WebSocket, bus_code: str) -> None:
+async def subscribe_bus_location(websocket: WebSocket, bus_code: str) -> None:
     channel = f"bus.{bus_code}"
     await psws_manager.subscribe_to_channel(channel, websocket)
 
@@ -533,7 +533,7 @@ async def websocket_bus_gps(websocket: WebSocket, bus_code: str) -> None:
 
 
 @app.websocket("/trips/{trip_id}/ws")
-async def websocket_bus_gps(websocket: WebSocket, trip_id: str) -> None:
+async def subscribe_trip_etas(websocket: WebSocket, trip_id: str) -> None:
     mapped_trip_id = utils.map_gtfs_trip(trip_id)
 
     channel = f"trip.{mapped_trip_id}"

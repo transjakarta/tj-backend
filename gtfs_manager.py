@@ -1,5 +1,5 @@
 import pandas as pd
-import gtfs_kit as gk
+import lib.gtfs_kit as gk
 from geopy.distance import geodesic
 
 
