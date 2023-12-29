@@ -26,6 +26,7 @@ import utils
 
 from eta.bus_eta_application import BusETAApplication
 from gtfs_manager import GTFSManager
+from gtfs_realtime_pb2 import FeedMessage
 from socket_manager import PubSubWebSocketManager
 
 
