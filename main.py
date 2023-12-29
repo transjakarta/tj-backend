@@ -1,33 +1,43 @@
-import os
-import requests
-import json
+# Standard library imports
 import asyncio
+import json
+import os
 
-import pandas as pd
-pd.set_option('display.max_columns', None)
-import gtfs_kit as gk
-from geopy.distance import geodesic
-
-from copy import deepcopy
-from json import loads
 from collections import defaultdict
+from contextlib import asynccontextmanager
+from copy import deepcopy
 from datetime import datetime, timedelta
+from json import loads
+
+# Related third-party imports
+import pandas as pd
 import pytz
+import requests
 
 from dotenv import load_dotenv
-
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from socket_manager import PubSubWebSocketManager
-from contextlib import asynccontextmanager
+from geopy.distance import geodesic
 from redis import Redis
 
+# Local application/library-specific import
+import gtfs_kit as gk
 import models
 import utils
+
 from eta.bus_eta_application import BusETAApplication
+from gtfs_manager import GTFSManager
+from socket_manager import PubSubWebSocketManager
 
 
+# Load environment variables from .env file
 load_dotenv()
 
+
+# Set timezone for Jakarta
+timezone = pytz.timezone("Asia/Jakarta")
+
+
+# Set up Redis connection
 redis = Redis(
     db=0,
     host=os.environ.get("REDIS_HOST"),
@@ -36,163 +46,139 @@ redis = Redis(
     decode_responses=True
 )
 
+# Initialize PubSub WebSocket Manager
 psws_manager = PubSubWebSocketManager(
     redis_host=os.environ.get("REDIS_HOST"),
     redis_port=os.environ.get("REDIS_PORT"),
     redis_password=os.environ.get("REDIS_PASSWORD")
 )
 
-# Global variables
-token = ""
+
+# Instance for GTFS manager
+gtfs_manager = GTFSManager("./gtfs", ["4B", "D21", "9H"])
+
+# Instance for ETA engine class
 eta_engine = None
-timezone = pytz.timezone("Asia/Jakarta")
+
+# Store bearer token for TransJakarta API authentication
+token = ""
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(_: FastAPI):
+    """Define an asynchronous context manager for managing the lifecycle of the FastAPI app"""
+
     global eta_engine
 
-    # Startup events
+    # Check Redis connection
     redis.ping()
-    eta_engine = BusETAApplication('./eta/assets/')
-    asyncio.create_task(heartbeat())
+
+    # Initialize ETA engine instance
+    eta_engine = BusETAApplication("./eta/assets/")
+
+    # Start polling task
+    asyncio.create_task(poll())
+
+    # Yield control back to the FastAPI app
     yield
 
     # Shutdown events
+    # Gracefully close WebSocket subscribers
     await psws_manager.close_subscribers()
 
-
+# Initialize the FastAPI application
 app = FastAPI(lifespan=lifespan)
 
 
-# GTFS dataframes
-feed = gk.read_feed("./data/gtfs", dist_units="km")
-route_ids = ["4B", "D21", "9H"]
+# GTFS dataframes setup
+# Read the GTFS data and set distance units to kilometers
+feed = gk.read_feed("./gtfs", dist_units="km")
 
-_routes = feed.routes[feed.routes["route_id"].isin(route_ids)]
-_trips = feed.trips[feed.trips["route_id"].isin(route_ids)]
+# Define specific route IDs that are of interest for the application
+available_route_ids = ["4B", "D21", "9H"]
 
+# Filter the routes dataframe to only include the routes specified in route_ids
+_routes = feed.routes[feed.routes["route_id"].isin(available_route_ids)]
+
+# Filter the trips dataframe to include only trips that are part of the selected routes
+_trips = feed.trips[feed.trips["route_id"].isin(available_route_ids)]
+
+# Filter the stop_times dataframe to include only stop times that belong to the selected trips
 _stop_times = feed.stop_times[
     feed.stop_times["trip_id"].isin(_trips["trip_id"])]
 
-# Aggregate list of trips and routes which each stop is a part of
+# Prepare the stops dataframe
+# Start by filtering the stops to include only those that are part of the selected stop times
 _stops = feed.stops[feed.stops["stop_id"].isin(_stop_times["stop_id"])]
+
+# Merge the stops dataframe with aggregated data
+# Aggregate data includes list of trips and routes that each stop is a part of
 _stops = _stops.merge(
     _stop_times
-    .merge(_trips, on="trip_id")
-    .merge(_stops, on="stop_id")
-    .groupby("stop_id").agg({
+    .merge(_trips, on="trip_id")  # Merge stop times with trips
+    .merge(_stops, on="stop_id")  # Merge the result with stops
+    .groupby("stop_id").agg({     # Group by stop_id and aggregate trip_ids and route_ids
+        # Unique list of trip_ids for each stop
         "trip_id": lambda x: list(set(x)),
+        # Unique list of route_ids for each stop
         "route_id": lambda x: list(set(x))
     })
-    .rename(columns={
+    .rename(columns={  # Rename columns for clarity
         "trip_id": "trips",
         "route_id": "routes"
     })
     .reset_index(),
     on="stop_id",
-    how="left"
+    how="left"  # Merge using left join to keep all stops
 )
 
 
+# TODO: Change to /trips
 @app.get("/routes")
-async def get_routes() -> list[models.TripRoute]:
-    routes = _routes[["route_id", "route_color", "route_text_color"]]
-    trips = _trips[["route_id", "trip_id", "trip_headsign", "direction_id"]]
+async def get_all_trips() -> list[models.TripRoute]:
+    """Read all available trips and its details"""
 
-    trip_stats = gk.compute_trip_stats(feed, route_ids=route_ids)[
-        ["trip_id", "num_stops", "distance"]]
-
-    merged = pd.merge(trips, trip_stats, on="trip_id")
-    merged = pd.merge(merged, routes, on="route_id")
-
-    merged["origin"] = merged.apply(
-        lambda row: row["trip_headsign"].split(" - ")[0], axis=1)
-    merged["destination"] = merged.apply(
-        lambda row: row["trip_headsign"].split(" - ")[1], axis=1)
-
-    merged["route_color"] = merged.apply(
-        lambda row: f"0x{row['route_color']}FF", axis=1)
-    merged["route_text_color"] = merged.apply(
-        lambda row: f"0x{row['route_text_color']}FF", axis=1)
-
-    merged["opposite_id"] = merged.apply(
-        lambda row: get_opposite_trip(row["route_id"], row["trip_id"]), axis=1)
-
-    merged = merged.drop(columns=["trip_headsign"])
-    merged = merged.rename(columns={
-        "trip_id": "id",
-        "route_id": "route",
-        "direction_id": "direction",
-        "route_color": "color",
-        "route_text_color": "text_color"
-    })
-
-    return loads(merged.to_json(orient="records"))
+    trips = gtfs_manager.get_all_trips()
+    return loads(trips.to_json(orient="records"))
 
 
 @app.get("/trip/{trip_id}")
-async def get_trip_by_trip_id(trip_id: str) -> models.Trip:
-    trip = _trips[_trips["trip_id"] == trip_id]
+async def get_trip_details_by_trip_id(trip_id: str) -> models.Trip:
+    """Read details of a specific trip"""
 
-    if trip.shape[0] == 0:
+    trip = gtfs_manager.get_trip_details(trip_id)
+
+    if trip is None:
         raise HTTPException(status_code=404, detail="Trip not found")
-
-    trip = trip[["route_id", "trip_id", "trip_headsign", "direction_id"]]
-    trip_stats = gk.compute_trip_stats(feed, route_ids=trip["route_id"])[
-        ["trip_id", "num_stops", "distance"]]
-
-    trip = pd.merge(trip, trip_stats, on="trip_id")
-    trip = trip.rename(columns={
-        "trip_id": "id",
-        "trip_headsign": "name",
-        "direction_id": "direction",
-    })
-
-    trip["origin"] = trip.apply(
-        lambda row: row["name"].split(" - ")[0], axis=1)
-    trip["destination"] = trip.apply(
-        lambda row: row["name"].split(" - ")[1], axis=1)
 
     return loads(trip.to_json(orient="records"))[0]
 
 
 @app.get("/trip/{trip_id}/geojson")
 async def get_trip_geojson_by_trip_id(trip_id: str):
-    json = gk.trips_to_geojson(feed, trip_ids=[trip_id])["features"][0]
-    del json["properties"]
-    return json
+    """Read GeoJSON shape of a specific trip"""
+
+    geojson = gtfs_manager.get_trip_geojson(trip_id)
+    return geojson
 
 
+# TODO: Change to /trip/{trip_id}/stops
 @app.get("/stops/{trip_id}", response_model_exclude_none=True)
-async def get_stops_by_route_id(trip_id: str, include_eta: bool = False) -> list[models.StopEta]:
-    stop_times = _stop_times.loc[
-        _stop_times["trip_id"] == trip_id,
-        ["stop_id", "stop_sequence"]]
+async def get_trip_stops_by_trip_id(trip_id: str, include_eta: bool = False) -> list[models.StopEta]:
+    """Read stops of a specific trip"""
 
-    stops = _stops[["stop_id", "stop_name", "stop_lat", "stop_lon"]]
-
-    merged = pd.merge(stop_times, stops, on="stop_id")
-    merged = merged.sort_values(by=["stop_sequence"])
+    stops = gtfs_manager.get_stops(trip_id)
 
     if include_eta:
-        def try_get_eta(row):
+        def try_get_etas(row):
             try:
-                return get_etas(row["stop_id"])[0]["eta"]
+                return get_etas(row["id"])[0]["eta"]
             except:
                 return None
 
-        merged["eta"] = merged.apply(try_get_eta, axis=1)
+        stops["eta"] = stops.apply(try_get_etas, axis=1)
 
-    merged = merged.rename(columns={
-        "stop_id": "id",
-        "stop_sequence": "order",
-        "stop_name": "name",
-        "stop_lat": "lat",
-        "stop_lon": "lon"
-    })
-
-    return loads(merged.to_json(orient="records"))
+    return loads(stops.to_json(orient="records"))
 
 
 @app.get("/search/stops", response_model_exclude_none=True)
@@ -353,34 +339,13 @@ async def get_place_by_distance_or_query(
 
 
 @app.get("/nearest-stops", response_model_exclude_none=True)
-async def get_stops_by_distance(
+async def get_nearest_stops(
     lat: float,
     lon: float,
 ) -> list[models.PlaceDetails]:
-    stops = _stops.loc[:, ["stop_id", "stop_name",
-                           "stop_lat", "stop_lon", "routes"]].copy()
+    """Get stops nearest to a specific coordinate"""
 
-    # Sort stops by distance
-    stops["walking_distance"] = stops.apply(
-        lambda row: geodesic((lat, lon), (row["stop_lat"], row["stop_lon"])).m,
-        axis=1
-    )
-    stops = stops.sort_values(by=["walking_distance"])
-
-    # rename to match model
-    stops = stops.rename(columns={
-        "stop_id": "id",
-        "stop_name": "name",
-        "stop_lat": "lat",
-        "stop_lon": "lon",
-    })
-
-    # Limit to top 10
-    stops = stops.head(10)
-
-    # calculate walking distance
-    stops["walking_duration"] = 5.0  # dummy: 5 minutes
-
+    stops = gtfs_manager.get_nearest_stops(lat, lon)
     return loads(stops.to_json(orient="records"))
 
 
@@ -803,8 +768,8 @@ def set_expired(key: str):
     redis.expireat(key, expiry)
 
 
-async def heartbeat():
-    print("Heartbeat started")
+async def poll():
+    print("Poll started")
     await tj_login()
 
     while True:
@@ -812,11 +777,11 @@ async def heartbeat():
 
         if not (1 <= current_time.hour < 5):
             print(
-                f"Heartbeat received on {current_time.strftime('%Y/%m/%d, %H:%M:%S')}")
+                f"Poll received on {current_time.strftime('%Y/%m/%d, %H:%M:%S')}")
             await poll_api()
             await prune_trip_eta()
         else:
             print(
-                f"Skipping heartbeat during off hours: {current_time.strftime('%Y/%m/%d, %H:%M:%S')}")
+                f"Skipping poll during off hours: {current_time.strftime('%Y/%m/%d, %H:%M:%S')}")
 
         await asyncio.sleep(5)
