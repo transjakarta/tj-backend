@@ -1,0 +1,9 @@
+{
+  "updaters": [
+    {
+      "type": "vehicle-positions",
+      "url": "http://server:8000/rt/vehicle",
+      "feedId": "1"
+    }
+  ]
+}

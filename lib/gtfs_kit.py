@@ -17,6 +17,7 @@ class Feed:
         self.shapes = None
         self.calendar = None
         self.calendar_dates = None
+        self.frequencies = None
         self.dist_units = None
 
     def read_feed(self, dir: str, dist_units: str) -> None:
@@ -27,6 +28,7 @@ class Feed:
         self.shapes = pd.read_csv(os.path.join(dir, "shapes.txt"))
         self.calendar = pd.read_csv(os.path.join(dir, "calendar.txt"))
         self.calendar_dates = pd.read_csv(os.path.join(dir, "calendar_dates.txt"))
+        self.frequencies = pd.read_csv(os.path.join(dir, "frequencies.txt"))
         self.dist_units = dist_units
 
 

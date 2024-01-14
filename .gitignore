@@ -1,7 +1,11 @@
 .venv
 env*
 .env
-graphs/*.obj
-graphs/*.zip
+
 __pycache__
 .DS_Store
+
+graphs/*.obj
+graphs/*.zip
+
+vehicle.pb

@@ -16,6 +16,7 @@ import requests
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
 from geopy.distance import geodesic
 from redis import Redis
 
@@ -26,7 +27,7 @@ import utils
 
 from eta.bus_eta_application import BusETAApplication
 from gtfs_manager import GTFSManager
-from gtfs_realtime_pb2 import FeedMessage
+from gtfs_realtime_manager import GTFSRealtimeManager
 from lib.socket_manager import PubSubWebSocketManager
 
 
@@ -57,6 +58,7 @@ psws_manager = PubSubWebSocketManager(
 
 # Instance for GTFS manager
 gtfs_manager = GTFSManager("./gtfs", ["4B", "D21", "9H"])
+realtime_manager = GTFSRealtimeManager()
 
 # Instance for ETA engine class
 eta_engine = None
@@ -182,6 +184,9 @@ async def get_trip_stops_by_trip_id(trip_id: str, include_eta: bool = False) -> 
     return loads(stops.to_json(orient="records"))
 
 
+import pytz
+import requests
+# TODO: Extract logic to gtfs_manager
 @app.get("/search/stops", response_model_exclude_none=True)
 async def get_stops_by_query(query: str) -> list[models.TripRouteStops]:
     # Search for stops which contains query
@@ -239,6 +244,7 @@ async def get_stops_by_query(query: str) -> list[models.TripRouteStops]:
     return json
 
 
+# TODO: Extract logic to gtfs_manager and possibly google places manager
 @app.get("/search", response_model_exclude_none=True)
 async def get_place_by_distance_or_query(
     query: str | None = None,
@@ -350,6 +356,7 @@ async def get_nearest_stops(
     return loads(stops.to_json(orient="records"))
 
 
+# TODO: Extract logic to gtfs_manager
 @app.post("/places", response_model_exclude_none=True)
 async def get_places_by_ids(body: models.GetPlacesByIdBody) -> list[models.PlaceDetails]:
     stops = _stops.loc[:, ["stop_id", "stop_name",
@@ -520,6 +527,16 @@ async def get_navigation(body: models.Endpoints):
     return data
 
 
+@app.get("/rt/vehicle")
+def get_realtime_vehicle_positions():
+    content = realtime_manager.generate_vehicle_positions()
+
+    with open("vehicle.pb", "wb") as file:
+        file.write(content)
+
+    return FileResponse("vehicle.pb", filename="vehicle.pb", media_type="application/octet-stream")
+
+
 @app.websocket("/bus/{bus_code}/ws")
 async def subscribe_bus_location(websocket: WebSocket, bus_code: str) -> None:
     channel = f"bus.{bus_code}"
@@ -546,8 +563,9 @@ async def subscribe_trip_etas(websocket: WebSocket, trip_id: str) -> None:
         await psws_manager.disconnect_from_channel(channel, websocket)
 
 
-# Fetch access token if not already available or already stale
 async def tj_login():
+    """Fetch access token if not already available or already stale"""
+
     global token
 
     url = "http://esb.transjakarta.co.id/api/v2/auth/signin"
@@ -566,8 +584,9 @@ async def tj_login():
     token = response.json()["accessToken"]
 
 
-# Fetch real-time GPS data periodically
 async def tj_fetch():
+    """Fetch real-time GPS data periodically"""
+
     global token
 
     url = "http://esb.transjakarta.co.id/api/v2/gps/listGPSBusTripUI"
@@ -581,8 +600,9 @@ async def tj_fetch():
     return pd.DataFrame.from_dict(data)
 
 
-# Append historical data to each bus data points
 def append_history(df):
+    """Append historical data to each bus data points"""
+
     new_df = pd.DataFrame(columns=["bus_code", "koridor", "gpsdatetime", "latitude",
                                    "longitude", "color", "gpsheading", "gpsspeed", "is_new", "trip_id"])
     for _, row in df.iterrows():
@@ -597,8 +617,9 @@ def append_history(df):
     return new_df
 
 
-# Append previous and next stops data to each bus
 def append_bus_stops(df):
+    """Append previous and next stops data to each bus"""
+
     for bus in df["bus_code"].unique():
         gps = df[df["bus_code"] == bus]
 
@@ -625,8 +646,9 @@ def append_bus_stops(df):
     return df
 
 
-# Broadcast real-time GPS data and save history
 async def broadcast_gps(df):
+    """Broadcast real-time GPS data and save history"""
+
     async def broadcast_to_bus_channel(row):
         channel = f"bus.{row['bus_code']}"
 
@@ -673,8 +695,9 @@ async def broadcast_gps(df):
     await asyncio.gather(*tasks)
 
 
-# Predict ETA for each bus based on GPS data
 async def predict_eta(df):
+    """Predict ETA for each bus based on GPS data"""
+
     new_df = append_history(df)
     if new_df.groupby(["bus_code"]).count()["gpsdatetime"].max() < 10:
         return
@@ -698,8 +721,15 @@ async def poll_api():
     try:
         df = await tj_fetch()
         df = df.drop(columns=["trip_desc"])
+
         df["trip_id"] = df.apply(
             lambda x: utils.map_gps_trip(x["trip_id"]), axis=1)
+
+        # Notes: we already have a function in gtfs_manager
+        df["start_time"] = "05:00:00"
+        df["start_date"] = "20040115"
+        
+        realtime_manager.update_vehicle_positions(df)
 
         await broadcast_gps(df)
         await predict_eta(df)
@@ -733,8 +763,9 @@ def get_opposite_trip(route: str, trip: str):
     return opposite_trips.iloc[0]["trip_id"]
 
 
-# Fetch latest bus history from redis
 def get_bus_history(bus_id):
+    """Fetch latest bus history from redis"""
+
     channel = f"bus.{bus_id}"
     entries = redis.lrange(channel, 0, 19)
 
@@ -745,8 +776,9 @@ def get_bus_history(bus_id):
     return pd.DataFrame()
 
 
-# Fetch all ETA of a stop from redis
 def get_etas(stop_id, bus_id=None):
+    """Fetch all ETA of a stop from redis"""
+
     stop_key = f"stop.{stop_id}"
     etas = []
 
@@ -761,8 +793,9 @@ def get_etas(stop_id, bus_id=None):
     return etas
 
 
-# Set default expire at 1am the next day
 def set_expired(key: str):
+    """Set default expire at 1am the next day"""
+
     now = datetime.now(timezone)
     expiry = datetime(now.year, now.month, now.day, 1, 0) + timedelta(days=1)
 

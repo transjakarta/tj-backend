@@ -206,3 +206,20 @@ class GTFSManager:
 
     def search_stops(self, query: str):
         """Return stops from a query"""
+        pass
+
+    # TODO: ini hack jelek banget, nanti refactor
+    def get_start_time(self, trip_id):
+        if trip_id not in self._trips["trip_id"].values:
+            return "05:00:00"
+
+        return self.feed.frequencies[self.feed.frequencies["trip_id"] == trip_id]["start_time"].iloc[0]
+
+    # TODO: ini hack jelek banget, nanti refactor
+    def get_start_date(self, trip_id):
+        if trip_id not in self._trips["trip_id"].values:
+            return "20040115"
+
+        service_id = self._trips[
+            self._trips["trip_id"] == trip_id]["service_id"].iloc[0]
+        return self.feed.calendar[self.feed.calendar["service_id"] == service_id]["start_date"].iloc[0]
