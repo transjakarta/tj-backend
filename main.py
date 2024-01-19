@@ -726,8 +726,8 @@ async def poll_api():
             lambda x: utils.map_gps_trip(x["trip_id"]), axis=1)
 
         # Notes: we already have a function in gtfs_manager
-        df["start_time"] = "05:00:00"
-        df["start_date"] = "20040115"
+        df["start_time_"] = "05:00:00"
+        df["start_date_"] = "20040115"
         
         realtime_manager.update_vehicle_positions(df)
 

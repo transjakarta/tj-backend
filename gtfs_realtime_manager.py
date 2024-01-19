@@ -15,7 +15,7 @@ class GTFSRealtimeManager:
     def update_vehicle_positions(self, df):
         self.vehicle_positions = df.copy()[["bus_code", "koridor", "trip_id", "gpsdatetime",
                                             "latitude", "longitude", "gpsheading", "gpsspeed",
-                                            "start_time", "start_date"]]
+                                            "start_time_", "start_date_"]]
 
     def generate_vehicle_positions(self):
         feed_message = gtfsrt.FeedMessage()
@@ -37,8 +37,8 @@ class GTFSRealtimeManager:
             trip_descriptor = vehicle_position.trip
             trip_descriptor.route_id = row["koridor"]
             trip_descriptor.trip_id = row["trip_id"]
-            trip_descriptor.start_time = row["start_time"]
-            trip_descriptor.start_date = row["start_date"]
+            trip_descriptor.start_time = row["start_time_"]
+            trip_descriptor.start_date = row["start_date_"]
 
             vehicle_descriptor = vehicle_position.vehicle
             vehicle_descriptor.id = row["bus_code"]
