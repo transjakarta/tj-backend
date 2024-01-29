@@ -1,9 +1,10 @@
 {
   "updaters": [
     {
-      "type": "vehicle-positions",
-      "url": "http://server:8000/rt/vehicle",
-      "feedId": "1"
+      "type" : "stop-time-updater",
+      "frequency" : "1m",
+      "feedId" : "1",
+      "url" : "http://server:8000/rt/trip"
     }
   ]
 }

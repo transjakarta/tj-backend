@@ -44,8 +44,11 @@ class GTFSManager:
             how="left"  # Merge using left join to keep all stops
         )
 
-    def get_all_trips(self):
+    def get_all_trips(self, simple=False):
         """Return all available trips and its details"""
+
+        if simple:
+            return self._trips[["route_id", "trip_id"]].copy().reset_index(drop=True)
 
         routes = self._routes[["route_id",
                                "route_color",
@@ -147,6 +150,9 @@ class GTFSManager:
             return None
 
         return opposite_trips.iloc[0]["trip_id"]
+    
+    def get_all_stops(self):
+        return self._stops.copy()
 
     def get_stops(self, trip_id: str):
         """Return stops of a specific trip"""
@@ -208,18 +214,19 @@ class GTFSManager:
         """Return stops from a query"""
         pass
 
-    # TODO: ini hack jelek banget, nanti refactor
-    def get_start_time(self, trip_id):
-        if trip_id not in self._trips["trip_id"].values:
-            return "05:00:00"
+    # def map_stops_eta(self, prediction: dict[str, float]):
+    #     stops = self._stops.loc[:, ["stop_id", "trips"]].copy()
 
-        return self.feed.frequencies[self.feed.frequencies["trip_id"] == trip_id]["start_time"].iloc[0]
+    #     print("WKWK", stops.head(), prediction)
+    #     def get_prediction(row):
+    #         if row["stop_id"] in prediction:
+    #             return prediction[row["stop_id"]]
+    #         return None
 
-    # TODO: ini hack jelek banget, nanti refactor
-    def get_start_date(self, trip_id):
-        if trip_id not in self._trips["trip_id"].values:
-            return "20040115"
+    #     stops["prediction"] = stops.apply(get_prediction, axis=1)
+    #     print(stops.head())
+    #     stops = stops.dropna()
 
-        service_id = self._trips[
-            self._trips["trip_id"] == trip_id]["service_id"].iloc[0]
-        return self.feed.calendar[self.feed.calendar["service_id"] == service_id]["start_date"].iloc[0]
+    #     print(stops.head())
+
+    #     return stops

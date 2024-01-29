@@ -184,8 +184,6 @@ async def get_trip_stops_by_trip_id(trip_id: str, include_eta: bool = False) -> 
     return loads(stops.to_json(orient="records"))
 
 
-import pytz
-import requests
 # TODO: Extract logic to gtfs_manager
 @app.get("/search/stops", response_model_exclude_none=True)
 async def get_stops_by_query(query: str) -> list[models.TripRouteStops]:
@@ -215,7 +213,8 @@ async def get_stops_by_query(query: str) -> list[models.TripRouteStops]:
         lambda row: f"0x{row['route_text_color']}FF", axis=1)
 
     merged["opposite_id"] = merged.apply(
-        lambda row: get_opposite_trip(row["route_id"], row["trip_id"]), axis=1)
+        lambda row: gtfs_manager.get_opposite_trip(row["route_id"], row["trip_id"]), 
+        axis=1)
 
     merged = merged[["route_id", "trip_id", "opposite_id", "direction_id",
                      "route_color", "route_text_color", "origin", "destination"]]
@@ -528,8 +527,29 @@ async def get_navigation(body: models.Endpoints):
 
 
 @app.get("/rt/vehicle")
-def get_realtime_vehicle_positions():
+async def get_realtime_vehicle_positions():
     content = realtime_manager.generate_vehicle_positions()
+
+    with open("vehicle.pb", "wb") as file:
+        file.write(content)
+
+    return FileResponse("vehicle.pb", filename="vehicle.pb", media_type="application/octet-stream")
+
+@app.get("/rt/trip")
+async def get_realtime_trip_updates():
+    stops = gtfs_manager.get_all_stops()[["stop_id", "trips"]]
+
+    def try_get_etas(row):
+        try:
+            return get_etas(row["stop_id"])[0]["eta"]
+        except:
+            return None
+
+    stops["eta"] = stops.apply(try_get_etas, axis=1)
+    stops = stops.dropna()
+    stops = stops.explode("trips")
+
+    content = realtime_manager.generate_trip_updates(stops)
 
     with open("vehicle.pb", "wb") as file:
         file.write(content)
@@ -721,13 +741,10 @@ async def poll_api():
     try:
         df = await tj_fetch()
         df = df.drop(columns=["trip_desc"])
+        df = df[~df["trip_id"].str.startswith("9H")]
 
         df["trip_id"] = df.apply(
             lambda x: utils.map_gps_trip(x["trip_id"]), axis=1)
-
-        # Notes: we already have a function in gtfs_manager
-        df["start_time_"] = "05:00:00"
-        df["start_date_"] = "20040115"
         
         realtime_manager.update_vehicle_positions(df)
 
@@ -751,16 +768,6 @@ async def prune_trip_eta():
 
             if eta < now:
                 redis.hdel(stop, bus)
-
-
-def get_opposite_trip(route: str, trip: str):
-    opposite_trips = _trips[(_trips["route_id"] == route)
-                            & (_trips["trip_id"] != trip)]
-
-    if opposite_trips.shape[0] == 0:
-        return None
-
-    return opposite_trips.iloc[0]["trip_id"]
 
 
 def get_bus_history(bus_id):
